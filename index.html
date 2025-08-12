@@ -1,0 +1,82 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Dynamic Incident Map</title>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+  <!-- Leaflet CSS -->
+  <link rel="stylesheet" href="https://unpkg.com/leaflet/dist/leaflet.css" />
+  <style>
+    #map {
+      height: 600px;
+      width: 100%;
+    }
+  </style>
+</head>
+<body>
+
+<h2 style="text-align: center;">Incident Map (Dynamic)</h2>
+<div id="map"></div>
+
+<!-- Leaflet JS -->
+<script src="https://unpkg.com/leaflet/dist/leaflet.js"></script>
+
+<script>
+  // Parse comma-separated values from URL
+  function getQueryParams() {
+    const params = new URLSearchParams(window.location.search);
+    const latitudes = (params.get('lat') || '').split(',').map(parseFloat);
+    const longitudes = (params.get('long') || '').split(',').map(parseFloat);
+    const counts = (params.get('count') || '').split(',').map(Number);
+    const states = (params.get('state') || '').split(',');
+
+    const data = [];
+
+    const length = Math.min(latitudes.length, longitudes.length, counts.length);
+    for (let i = 0; i < length; i++) {
+      if (!isNaN(latitudes[i]) && !isNaN(longitudes[i]) && !isNaN(counts[i])) {
+        data.push({
+          state: states[i] || `Location ${i + 1}`,
+          lat: latitudes[i],
+          long: longitudes[i],
+          count: counts[i]
+        });
+      }
+    }
+    return data;
+  }
+
+  const incidentData = getQueryParams();
+
+  // Fallback if no data
+  const centerLat = incidentData[0]?.lat || 24.774265;
+  const centerLong = incidentData[0]?.long || 46.738586;
+
+  const map = L.map('map').setView([centerLat, centerLong], 6);
+
+  // Add OpenStreetMap layer
+  L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+    maxZoom: 18,
+  }).addTo(map);
+
+  // Add markers
+  incidentData.forEach((incident) => {
+    L.circleMarker([incident.lat, incident.long], {
+      radius: 5 + incident.count / 10, // Scale down for better view
+      color: 'blue',
+      fillColor: '#0077ff',
+      fillOpacity: 0.6
+    })
+    .addTo(map)
+    .bindPopup(`
+      <b>${incident.state}</b><br>
+      Lat: ${incident.lat}<br>
+      Long: ${incident.long}<br>
+      Count: ${incident.count}
+    `);
+  });
+</script>
+
+</body>
+</html>
