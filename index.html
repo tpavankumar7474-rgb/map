@@ -21,7 +21,6 @@
 
   <script src="https://unpkg.com/leaflet@1.9.3/dist/leaflet.js"></script>
   <script>
-    // Default map view on Riyadh
     const map = L.map('map').setView([24.7136, 46.6753], 6);
 
     L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
@@ -31,22 +30,19 @@
 
     const markers = [];
 
-    // Remove existing markers
-    function clearMarkers() {
-      markers.forEach(marker => map.removeLayer(marker));
-      markers.length = 0;
-    }
-
-    // Handle incoming data from Grafana
     window.addEventListener('message', (event) => {
       const data = event.data;
+      console.log("Received data from parent:", data);
 
       if (!data || !data.lat || !data.long || !data.state) {
         console.warn("Invalid or missing data from parent:", data);
         return;
       }
 
-      clearMarkers();
+      // Remove existing markers
+      markers.forEach(marker => map.removeLayer(marker));
+      markers.length = 0;
+
       const latLngs = [];
 
       for (let i = 0; i < data.lat.length; i++) {
@@ -63,7 +59,6 @@
         }
       }
 
-      // Fit map to markers
       if (latLngs.length === 1) {
         map.setView(latLngs[0], 10);
       } else if (latLngs.length > 1) {
