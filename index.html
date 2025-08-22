@@ -1,82 +1,77 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
-  <title>Dynamic Incident Map</title>
-  <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-
-  <!-- Leaflet CSS -->
-  <link rel="stylesheet" href="https://unpkg.com/leaflet/dist/leaflet.css" />
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Saudi Arabia Map with Multiple Markers</title>
+  <link
+    rel="stylesheet"
+    href="https://unpkg.com/leaflet@1.9.3/dist/leaflet.css"
+    integrity="sha256-sA+4Mz5pF8Rxz6AKD4vQv6jCClt6IX3YxX8ngAtbN6o="
+    crossorigin=""
+  />
   <style>
-    #map {
-      height: 600px;
-      width: 100%;
+    body, html, #map {
+      height: 100%;
+      margin: 0;
+      padding: 0;
     }
   </style>
 </head>
 <body>
+  <div id="map"></div>
 
-<h2 style="text-align: center;">Incident Map (Dynamic)</h2>
-<div id="map"></div>
+  <script
+    src="https://unpkg.com/leaflet@1.9.3/dist/leaflet.js"
+    integrity="sha256-oM5DEEGqfOZFjAUssU6+Dw7gXsyC2zJBWPO5h1zM8jI="
+    crossorigin=""
+  ></script>
+  <script>
+    // Parse URL parameter "points" with format: lat,lng,label;lat,lng,label;...
+    const urlParams = new URLSearchParams(window.location.search);
+    const pointsParam = urlParams.get('points');
 
-<!-- Leaflet JS -->
-<script src="https://unpkg.com/leaflet/dist/leaflet.js"></script>
+    let points = [];
 
-<script>
-  // Parse comma-separated values from URL
-  function getQueryParams() {
-    const params = new URLSearchParams(window.location.search);
-    const latitudes = (params.get('lat') || '').split(',').map(parseFloat);
-    const longitudes = (params.get('long') || '').split(',').map(parseFloat);
-    const counts = (params.get('count') || '').split(',').map(Number);
-    const states = (params.get('state') || '').split(',');
+    if (pointsParam) {
+      points = pointsParam.split(';').map(pointStr => {
+        const [latStr, lngStr, ...labelParts] = pointStr.split(',');
+        const lat = parseFloat(latStr);
+        const lng = parseFloat(lngStr);
+        const label = labelParts.join(',').trim() || 'No label';
 
-    const data = [];
-
-    const length = Math.min(latitudes.length, longitudes.length, counts.length);
-    for (let i = 0; i < length; i++) {
-      if (!isNaN(latitudes[i]) && !isNaN(longitudes[i]) && !isNaN(counts[i])) {
-        data.push({
-          state: states[i] || `Location ${i + 1}`,
-          lat: latitudes[i],
-          long: longitudes[i],
-          count: counts[i]
-        });
-      }
+        return (isNaN(lat) || isNaN(lng)) ? null : { lat, lng, label };
+      }).filter(p => p !== null);
     }
-    return data;
-  }
 
-  const incidentData = getQueryParams();
+    // Default point if none provided (Riyadh)
+    if (points.length === 0) {
+      points = [{ lat: 24.7136, lng: 46.6753, label: 'Riyadh' }];
+    }
 
-  // Fallback if no data
-  const centerLat = incidentData[0]?.lat || 24.774265;
-  const centerLong = incidentData[0]?.long || 46.738586;
+    // Initialize map and fit all markers
+    const map = L.map('map');
 
-  const map = L.map('map').setView([centerLat, centerLong], 6);
+    // Add OpenStreetMap tiles
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+      maxZoom: 19,
+      attribution: '© OpenStreetMap contributors'
+    }).addTo(map);
 
-  // Add OpenStreetMap layer
-  L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-    maxZoom: 18,
-  }).addTo(map);
+    // Add markers and collect LatLng for fitting bounds
+    const latLngs = [];
+    points.forEach(({lat, lng, label}) => {
+      const marker = L.marker([lat, lng]).addTo(map);
+      marker.bindPopup(label);
+      latLngs.push([lat, lng]);
+    });
 
-  // Add markers
-  incidentData.forEach((incident) => {
-    L.circleMarker([incident.lat, incident.long], {
-      radius: 5 + incident.count / 10, // Scale down for better view
-      color: 'blue',
-      fillColor: '#0077ff',
-      fillOpacity: 0.6
-    })
-    .addTo(map)
-    .bindPopup(`
-      <b>${incident.state}</b><br>
-      Lat: ${incident.lat}<br>
-      Long: ${incident.long}<br>
-      Count: ${incident.count}
-    `);
-  });
-</script>
-
+    // Fit map view to markers, or set default zoom if one marker
+    if (latLngs.length === 1) {
+      map.setView(latLngs[0], 12);
+    } else {
+      map.fitBounds(latLngs, { padding: [50, 50] });
+    }
+  </script>
 </body>
 </html>
