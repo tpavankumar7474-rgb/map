@@ -4,10 +4,9 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Incident Map</title>
-  <link
-    rel="stylesheet"
-    href="https://unpkg.com/leaflet@1.9.3/dist/leaflet.css"
-  />
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.3/dist/leaflet.css" />
+  <link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster/dist/MarkerCluster.css" />
+  <link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster/dist/MarkerCluster.Default.css" />
   <style>
     html, body, #map {
       height: 100%;
@@ -20,28 +19,26 @@
   <div id="map"></div>
 
   <script src="https://unpkg.com/leaflet@1.9.3/dist/leaflet.js"></script>
+  <script src="https://unpkg.com/leaflet.markercluster/dist/leaflet.markercluster.js"></script>
   <script>
     const map = L.map('map').setView([24.7136, 46.6753], 6);
 
     L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-      maxZoom: 19,
+      maxZoom: 18,
       attribution: '© OpenStreetMap contributors'
     }).addTo(map);
 
-    const markers = [];
+    let markerCluster = L.markerClusterGroup();
+    map.addLayer(markerCluster);
 
     window.addEventListener('message', (event) => {
       const data = event.data;
-      console.log("Received data from parent:", data);
-
       if (!data || !data.lat || !data.long || !data.state) {
         console.warn("Invalid or missing data from parent:", data);
         return;
       }
 
-      // Remove existing markers
-      markers.forEach(marker => map.removeLayer(marker));
-      markers.length = 0;
+      markerCluster.clearLayers();  // Clear previous
 
       const latLngs = [];
 
@@ -52,9 +49,9 @@
         const count = data.count[i];
 
         if (!isNaN(lat) && !isNaN(lng)) {
-          const marker = L.marker([lat, lng]).addTo(map);
+          const marker = L.marker([lat, lng]);
           marker.bindPopup(`${label}<br>Count: ${count}`);
-          markers.push(marker);
+          markerCluster.addLayer(marker);
           latLngs.push([lat, lng]);
         }
       }
