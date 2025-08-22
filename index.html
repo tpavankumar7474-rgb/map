@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Saudi Arabia Map</title>
+  <title>Incident Map</title>
   <link
     rel="stylesheet"
     href="https://unpkg.com/leaflet@1.9.3/dist/leaflet.css"
@@ -21,47 +21,55 @@
 
   <script src="https://unpkg.com/leaflet@1.9.3/dist/leaflet.js"></script>
   <script>
-    const urlParams = new URLSearchParams(window.location.search);
-    const pointsParam = urlParams.get('points');
-
-    let points = [];
-
-    if (pointsParam) {
-      points = pointsParam.split(';').map(pointStr => {
-        const [latStr, lngStr, ...labelParts] = pointStr.split(',');
-        const lat = parseFloat(latStr);
-        const lng = parseFloat(lngStr);
-        const label = labelParts.join(',').trim() || 'Marker';
-
-        return (isNaN(lat) || isNaN(lng)) ? null : { lat, lng, label };
-      }).filter(p => p !== null);
-    }
-
-    // Use Riyadh if no points provided
-    if (points.length === 0) {
-      points = [{ lat: 24.7136, lng: 46.6753, label: 'Riyadh (Default)' }];
-    }
-
-    const map = L.map('map');
+    // Default map view on Riyadh
+    const map = L.map('map').setView([24.7136, 46.6753], 6);
 
     L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
       maxZoom: 19,
       attribution: '© OpenStreetMap contributors'
     }).addTo(map);
 
-    const latLngs = [];
+    const markers = [];
 
-    points.forEach(({ lat, lng, label }) => {
-      const marker = L.marker([lat, lng]).addTo(map);
-      marker.bindPopup(label);
-      latLngs.push([lat, lng]);
-    });
-
-    if (latLngs.length === 1) {
-      map.setView(latLngs[0], 10);
-    } else {
-      map.fitBounds(latLngs, { padding: [40, 40] });
+    // Remove existing markers
+    function clearMarkers() {
+      markers.forEach(marker => map.removeLayer(marker));
+      markers.length = 0;
     }
+
+    // Handle incoming data from Grafana
+    window.addEventListener('message', (event) => {
+      const data = event.data;
+
+      if (!data || !data.lat || !data.long || !data.state) {
+        console.warn("Invalid or missing data from parent:", data);
+        return;
+      }
+
+      clearMarkers();
+      const latLngs = [];
+
+      for (let i = 0; i < data.lat.length; i++) {
+        const lat = parseFloat(data.lat[i]);
+        const lng = parseFloat(data.long[i]);
+        const label = decodeURIComponent(data.state[i]);
+        const count = data.count[i];
+
+        if (!isNaN(lat) && !isNaN(lng)) {
+          const marker = L.marker([lat, lng]).addTo(map);
+          marker.bindPopup(`${label}<br>Count: ${count}`);
+          markers.push(marker);
+          latLngs.push([lat, lng]);
+        }
+      }
+
+      // Fit map to markers
+      if (latLngs.length === 1) {
+        map.setView(latLngs[0], 10);
+      } else if (latLngs.length > 1) {
+        map.fitBounds(latLngs, { padding: [40, 40] });
+      }
+    });
   </script>
 </body>
 </html>
