@@ -32,10 +32,10 @@
 
     let currentSelected = null;
 
-    // 🧠 Send ready message immediately
+    // 🧠 Tell Grafana iframe is ready
     window.parent.postMessage({ type: "iframeReady" }, "*");
 
-    // ✅ Render Data (no reload, no reposition)
+    // ✅ Render incoming incident data
     function renderData(arr) {
       if (!Array.isArray(arr) || arr.length === 0) return;
       clusterGroup.clearLayers();
@@ -51,23 +51,25 @@
         const marker = L.marker([d.lat, d.long]);
         marker.bindTooltip(tooltip, { direction: "top", opacity: 0.9 });
 
-        // 🧩 Click marker → update variable (no fly, no zoom)
+        // 🧩 Click → send LOCATIONNAME, Latitude, Longitude
         marker.on("click", () => {
           if (currentSelected === d.state) {
-            // deselect (reset to All)
+            // 🔁 Deselect → reset all to "All"
             currentSelected = null;
             window.parent.postMessage({
               type: "updateVariable",
-              variable: "selected_state",
-              value: "All"
+              value: "All",
+              lat: "All",
+              long: "All"
             }, "*");
-            marker.setIcon(defaultIcon);
           } else {
+            // ✅ Select → send actual values
             currentSelected = d.state;
             window.parent.postMessage({
               type: "updateVariable",
-              variable: "selected_state",
-              value: d.state
+              value: d.state,
+              lat: d.lat,
+              long: d.long
             }, "*");
           }
         });
@@ -76,7 +78,7 @@
       });
     }
 
-    // ✅ Receive data from Grafana
+    // ✅ Listen for incident data from Grafana
     window.addEventListener("message", (event) => {
       if (event.data?.type === "incidentData" && Array.isArray(event.data.data)) {
         renderData(event.data.data);
