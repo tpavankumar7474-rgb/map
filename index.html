@@ -13,12 +13,6 @@
       margin: 0;
       padding: 0;
     }
-    .leaflet-tooltip {
-      background: white;
-      color: black;
-      border: 1px solid #999;
-      font-size: 13px;
-    }
   </style>
 </head>
 <body>
@@ -37,12 +31,11 @@
     map.addLayer(clusterGroup);
 
     let currentSelected = null;
-    const defaultIcon = new L.Icon.Default();
 
-    // 🔹 Notify Grafana that map is ready
+    // 🧠 Send ready message immediately
     window.parent.postMessage({ type: "iframeReady" }, "*");
 
-    // 🔹 Render markers
+    // ✅ Render Data (no reload, no reposition)
     function renderData(arr) {
       if (!Array.isArray(arr) || arr.length === 0) return;
       clusterGroup.clearLayers();
@@ -50,33 +43,31 @@
       arr.forEach(d => {
         if (!d.lat || !d.long) return;
 
-        const marker = L.marker([d.lat, d.long], { icon: defaultIcon });
         const tooltip = `
-          <strong>Governorate:</strong> ${d.state}<br/>
-          <strong>Count:</strong> ${d.count}<br/>
-          <strong>Lat:</strong> ${d.lat}<br/>
-          <strong>Long:</strong> ${d.long}
+          <strong>المحافظة:</strong> ${d.state}<br/>
+          <strong>عدد الحوادث:</strong> ${d.count}
         `;
+
+        const marker = L.marker([d.lat, d.long]);
         marker.bindTooltip(tooltip, { direction: "top", opacity: 0.9 });
 
+        // 🧩 Click marker → update variable (no fly, no zoom)
         marker.on("click", () => {
           if (currentSelected === d.state) {
-            // 🟢 Deselect (reset all)
+            // deselect (reset to All)
             currentSelected = null;
             window.parent.postMessage({
               type: "updateVariable",
-              value: "All",
-              lat: "All",
-              long: "All"
+              variable: "selected_state",
+              value: "All"
             }, "*");
+            marker.setIcon(defaultIcon);
           } else {
-            // 🟣 Select marker and update variables
             currentSelected = d.state;
             window.parent.postMessage({
               type: "updateVariable",
-              value: d.state,
-              lat: d.lat,
-              long: d.long
+              variable: "selected_state",
+              value: d.state
             }, "*");
           }
         });
@@ -85,7 +76,7 @@
       });
     }
 
-    // 🔹 Listen for data from Grafana
+    // ✅ Receive data from Grafana
     window.addEventListener("message", (event) => {
       if (event.data?.type === "incidentData" && Array.isArray(event.data.data)) {
         renderData(event.data.data);
@@ -94,3 +85,4 @@
   </script>
 </body>
 </html>
+
