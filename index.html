@@ -5,7 +5,6 @@
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>Ultra-Fast Incident Map</title>
 
-<!-- Leaflet CSS -->
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.3/dist/leaflet.css" />
 <style>
   html, body, #map {
@@ -14,9 +13,8 @@
     padding: 0;
   }
 
-  /* ✅ Remove all hand/pointer cursors */
-  #map,
-  #map * {
+  /* Remove all hand/pointer cursors */
+  #map, #map * {
     cursor: default !important;
   }
 </style>
@@ -24,36 +22,25 @@
 <body>
 <div id="map"></div>
 
-<!-- JS Libraries -->
+<!-- Libraries -->
 <script src="https://unpkg.com/leaflet@1.9.3/dist/leaflet.js"></script>
 <script src="https://unpkg.com/supercluster@8.0.1/dist/supercluster.min.js"></script>
 
 <script>
-  // === Initialize map ===
-  const map = L.map('map', { preferCanvas: true, zoomControl: true })
-    .setView([24.7136, 46.6753], 6);
-
-  // === Base tile layer ===
+  const map = L.map('map', { preferCanvas: true }).setView([24.7136, 46.6753], 6);
   L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-    attribution: '© OpenStreetMap contributors',
-    maxZoom: 18
+    attribution: '© OpenStreetMap contributors'
   }).addTo(map);
 
-  // === Supercluster ===
-  let clusterIndex = supercluster({
-    radius: 60,
-    maxZoom: 17
-  });
-
-  // === Layers & states ===
+  const clusterIndex = supercluster({ radius: 60, maxZoom: 17 });
   const markersLayer = L.layerGroup().addTo(map);
+
   let allPoints = [];
   let selectedState = null;
 
   const BLUE = "#007bff";
   const YELLOW = "#ffcc00";
 
-  // === Render clusters and individual markers ===
   function renderClusters() {
     markersLayer.clearLayers();
 
@@ -66,25 +53,24 @@
       const [lng, lat] = cluster.geometry.coordinates;
 
       if (cluster.properties.cluster) {
-        // Cluster node
+        // Cluster
         const count = cluster.properties.point_count;
-        const size = Math.min(40, 10 + (Math.log(count) * 5));
-
+        const size = Math.min(40, 10 + Math.log(count) * 5);
         const circle = L.circleMarker([lat, lng], {
           radius: size / 2,
           fillColor: "#3388ff",
           color: "#ffffff",
           weight: 1,
           fillOpacity: 0.8,
-          interactive: false // ✅ no cursor or interactivity
+          interactive: false
         }).bindTooltip(`${count} points`);
 
         circle.on("click", () => map.setView([lat, lng], zoom + 2));
         markersLayer.addLayer(circle);
       } else {
-        // Individual point
-        const { state } = cluster.properties;
-        const isSelected = (state === selectedState);
+        // Single point
+        const { state, count } = cluster.properties;
+        const isSelected = state === selectedState;
 
         const marker = L.circleMarker([lat, lng], {
           radius: 6,
@@ -94,55 +80,53 @@
           fillOpacity: 1
         });
 
-        marker.on("click", () => handleMarkerClick(state, lat, lng));
+        marker.on("click", () => handleMarkerClick(state, lat, lng, count));
         markersLayer.addLayer(marker);
       }
     });
   }
 
-  // === Handle click: toggle color + update/reset variable ===
-  function handleMarkerClick(state, lat, lng) {
+  function handleMarkerClick(state, lat, lng, count) {
     if (selectedState === state) {
-      // Deselect → back to blue
+      // Deselect
       selectedState = null;
       window.parent.postMessage({
-        type: "mapVariableReset",
-        LOCATIONNAME: "All",
-        Latitude: "All",
-        Longitude: "All"
+        type: "mapClick",
+        state: "All",
+        lat: "All",
+        long: "All",
+        label: "All",
+        count: "All"
       }, "*");
     } else {
-      // Select → turn yellow
+      // Select
       selectedState = state;
       window.parent.postMessage({
-        type: "mapVariableUpdate",
-        LOCATIONNAME: state,
-        Latitude: lat,
-        Longitude: lng
+        type: "mapClick",
+        state: state,
+        lat: lat,
+        long: lng,
+        label: state,
+        count: count
       }, "*");
     }
 
-    renderClusters(); // redraw with updated colors
+    renderClusters();
   }
 
-  // === Handle incoming Grafana data ===
+  // Listen for data from Grafana
   window.addEventListener("message", (event) => {
     const data = event.data;
-    if (!data || !data.lat || !data.long || !data.state) return;
+    if (!data || data.type !== "incidentData") return;
 
-    // Prepare GeoJSON features
     allPoints = data.lat.map((lat, i) => ({
       type: "Feature",
       geometry: { type: "Point", coordinates: [parseFloat(data.long[i]), parseFloat(lat)] },
-      properties: {
-        state: decodeURIComponent(data.state[i]),
-        count: data.count[i]
-      }
+      properties: { state: decodeURIComponent(data.state[i]), count: data.count[i] }
     }));
 
     clusterIndex.load(allPoints);
 
-    // Fit map once on initial load
     if (allPoints.length > 0) {
       const latLngs = allPoints.map(p => [p.geometry.coordinates[1], p.geometry.coordinates[0]]);
       map.fitBounds(latLngs, { padding: [30, 30] });
@@ -151,10 +135,8 @@
     renderClusters();
   });
 
-  // Update clusters when moving or zooming
   map.on("moveend", renderClusters);
-
-  console.log("🚀 Supercluster map ready — handles 100k+ points smoothly, no hand cursor");
+  console.log("🚀 Map ready for 100k+ points (No hand symbol)");
 </script>
 </body>
 </html>
