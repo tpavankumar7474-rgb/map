@@ -3,13 +3,23 @@
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>Incident Map (Optimized)</title>
+<title>Incident Map (Optimized & Clean)</title>
 
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.3/dist/leaflet.css" />
 <link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster/dist/MarkerCluster.css" />
 <link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster/dist/MarkerCluster.Default.css" />
 <style>
-  html, body, #map { height: 100%; margin: 0; padding: 0; }
+  html, body, #map {
+    height: 100%;
+    margin: 0;
+    padding: 0;
+    cursor: default;
+  }
+
+  /* Remove "hand" cursor on markers */
+  .leaflet-marker-icon {
+    cursor: default !important;
+  }
 </style>
 </head>
 <body>
@@ -18,6 +28,7 @@
 <script src="https://unpkg.com/leaflet@1.9.3/dist/leaflet.js"></script>
 <script src="https://unpkg.com/leaflet.markercluster/dist/leaflet.markercluster.js"></script>
 <script>
+  // === MAP INITIALIZATION ===
   const map = L.map('map', { preferCanvas: true }).setView([24.7136, 46.6753], 6);
 
   L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
@@ -25,30 +36,20 @@
     attribution: '© OpenStreetMap contributors'
   }).addTo(map);
 
+  // === CLUSTER GROUP ===
   const markerCluster = L.markerClusterGroup({
     disableClusteringAtZoom: 9,
-    chunkedLoading: true,          // ⚡ async chunked marker loading
-    chunkDelay: 25,                // slight delay between batches
-    chunkInterval: 200,            // milliseconds between chunks
-    chunkProgress: (processed, total, elapsed) => {
-      if (elapsed > 1000) {
-        console.log(`Processing markers: ${processed}/${total} (${Math.round(processed / total * 100)}%)`);
-      }
-    }
+    chunkedLoading: true,
+    chunkDelay: 25,
+    chunkInterval: 200
   });
-
   map.addLayer(markerCluster);
 
-  let markerDataMap = new Map();
-  let currentDataHash = null;
-  let selectedMarker = null;
-  let initialViewSet = false;
-
-  const defaultIcon = L.icon({
-    iconUrl: "https://unpkg.com/leaflet@1.9.3/dist/images/marker-icon.png",
-    shadowUrl: "https://unpkg.com/leaflet@1.9.3/dist/images/marker-shadow.png",
-    iconSize: [25, 41],
-    iconAnchor: [12, 41]
+  // === ICONS ===
+  const blueIcon = L.icon({
+    iconUrl: "https://maps.google.com/mapfiles/ms/icons/blue-dot.png",
+    iconSize: [32, 32],
+    iconAnchor: [16, 32]
   });
 
   const yellowIcon = L.icon({
@@ -57,57 +58,40 @@
     iconAnchor: [16, 32]
   });
 
+  // === STATE MANAGEMENT ===
+  let markerDataMap = new Map();
+  let currentDataHash = null;
+  let selectedMarker = null;
+  let initialViewSet = false;
+
+  // === HASH GENERATOR ===
   function generateDataHash(data) {
     if (!data || !data.lat) return null;
     return data.lat.length + "_" + data.lat[0] + "_" + data.long[0];
   }
 
-  // === Optimized batched marker loader ===
+  // === BATCHED MARKER ADDING ===
   function addMarkersInBatches(data, latLngs) {
-    const batchSize = 500; // adjust depending on data volume
+    const batchSize = 500;
     let index = 0;
 
     function processBatch() {
       const end = Math.min(index + batchSize, data.lat.length);
+
       for (let i = index; i < end; i++) {
         const lat = parseFloat(data.lat[i]);
         const lng = parseFloat(data.long[i]);
-        const label = decodeURIComponent(data.state[i]);
-        const count = data.count[i];
         if (isNaN(lat) || isNaN(lng)) continue;
 
-        const marker = L.marker([lat, lng], { icon: defaultIcon });
-        marker.bindPopup(`${label}<br>Count: ${count}`);
+        const label = decodeURIComponent(data.state[i]);
+        const count = data.count[i];
         const markerId = `${lat}_${lng}`;
+
+        const marker = L.marker([lat, lng], { icon: blueIcon });
+        marker.bindPopup(`${label}<br>Count: ${count}`);
         markerDataMap.set(markerId, { state: data.state[i], lat, lng, label, count, marker });
 
-        marker.on("click", () => {
-          const markerData = markerDataMap.get(markerId);
-
-          // Toggle selection (yellow <-> default)
-          if (selectedMarker === marker) {
-            marker.setIcon(defaultIcon);
-            selectedMarker = null;
-            window.parent.postMessage({
-              type: "mapVariableReset",
-              LOCATIONNAME: "All",
-              Latitude: "All",
-              Longitude: "All"
-            }, "*");
-            return;
-          }
-
-          if (selectedMarker) selectedMarker.setIcon(defaultIcon);
-          marker.setIcon(yellowIcon);
-          selectedMarker = marker;
-
-          window.parent.postMessage({
-            type: "mapVariableUpdate",
-            LOCATIONNAME: markerData.state,
-            Latitude: markerData.lat,
-            Longitude: markerData.lng
-          }, "*");
-        });
+        marker.on("click", () => handleMarkerClick(markerId));
 
         markerCluster.addLayer(marker);
         latLngs.push([lat, lng]);
@@ -124,6 +108,41 @@
     requestAnimationFrame(processBatch);
   }
 
+  // === MARKER CLICK HANDLER ===
+  function handleMarkerClick(markerId) {
+    const markerData = markerDataMap.get(markerId);
+    const marker = markerData.marker;
+
+    // Toggle between yellow and blue
+    if (selectedMarker === marker) {
+      marker.setIcon(blueIcon);
+      selectedMarker = null;
+      window.parent.postMessage({
+        type: "mapVariableReset",
+        LOCATIONNAME: "All",
+        Latitude: "All",
+        Longitude: "All"
+      }, "*");
+      return;
+    }
+
+    // Reset previous selection
+    if (selectedMarker) selectedMarker.setIcon(blueIcon);
+
+    // Highlight current marker
+    marker.setIcon(yellowIcon);
+    selectedMarker = marker;
+
+    // Send update to parent
+    window.parent.postMessage({
+      type: "mapVariableUpdate",
+      LOCATIONNAME: markerData.state,
+      Latitude: markerData.lat,
+      Longitude: markerData.lng
+    }, "*");
+  }
+
+  // === HANDLE INCOMING DATA FROM GRAFANA ===
   window.addEventListener("message", (event) => {
     const data = event.data;
     if (!data || !data.lat || !data.long || !data.state) return;
@@ -143,7 +162,7 @@
     const latLngs = [];
     addMarkersInBatches(data, latLngs);
 
-    // Fast-fit bounds only once
+    // Adjust view only initially
     if (shouldSetInitialView && data.lat.length > 0) {
       const firstLat = parseFloat(data.lat[0]);
       const firstLng = parseFloat(data.long[0]);
