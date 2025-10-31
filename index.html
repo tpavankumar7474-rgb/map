@@ -13,134 +13,103 @@
       margin: 0;
       padding: 0;
     }
-    #backButton {
-      position: absolute;
-      top: 12px;
-      left: 12px;
-      z-index: 9999;
-      background: rgba(255,255,255,0.9);
-      border: 1px solid #ccc;
-      border-radius: 8px;
-      padding: 6px 12px;
-      cursor: pointer;
+    .leaflet-tooltip {
+      background: rgba(0, 0, 0, 0.8);
+      color: #fff;
       font-size: 13px;
-      font-weight: 600;
-      transition: 0.2s;
-    }
-    #backButton:hover {
-      background: #f0f0f0;
+      border-radius: 6px;
+      padding: 5px 8px;
     }
   </style>
 </head>
 <body>
   <div id="map"></div>
-  <button id="backButton">🔙 Back</button>
 
   <script src="https://unpkg.com/leaflet@1.9.3/dist/leaflet.js"></script>
   <script src="https://unpkg.com/leaflet.markercluster/dist/leaflet.markercluster.js"></script>
 
   <script>
-    // ============= Initialize Map =============
+    // ================= INIT MAP =================
     const map = L.map("map", { zoomControl: true }).setView([23.8859, 45.0792], 6);
     L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
       maxZoom: 18,
       attribution: "© OpenStreetMap contributors"
     }).addTo(map);
 
-    const clusterGroup = L.markerClusterGroup();
+    const clusterGroup = L.markerClusterGroup({ disableClusteringAtZoom: 9 });
     map.addLayer(clusterGroup);
 
-    // Persist map state
-    let lastCenter = map.getCenter();
-    let lastZoom = map.getZoom();
+    let selectedMarker = null; // to track selected marker
     let lastDataHash = null;
-    let userInteracted = false;
 
-    map.on("moveend zoomend", () => {
-      lastCenter = map.getCenter();
-      lastZoom = map.getZoom();
-    });
+    // ================= HELPER =================
+    function hashData(arr) {
+      return arr.map(d => `${d.state}|${d.lat}|${d.long}|${d.count}`).join(",");
+    }
 
-    // ============= Helpers =============
-    const hashData = (arr) => arr.map(d => `${d.state}|${d.lat}|${d.long}|${d.count}`).join(",");
-
-    // ============= Render Data =============
+    // ================= RENDER DATA =================
     function renderData(arr) {
       if (!Array.isArray(arr) || arr.length === 0) return;
 
       const newHash = hashData(arr);
-      if (newHash === lastDataHash) return; // skip identical data
+      if (newHash === lastDataHash) return;
       lastDataHash = newHash;
 
       clusterGroup.clearLayers();
-      const bounds = [];
 
       arr.forEach(d => {
         if (!d.lat || !d.long) return;
 
         const tooltip = `
-          <strong>المحافظة:</strong> ${decodeURIComponent(d.state)}<br/>
+          <strong>المحافظة:</strong> ${d.state}<br/>
           <strong>عدد الحوادث:</strong> ${d.count}
         `;
+
         const marker = L.marker([d.lat, d.long]);
         marker.bindTooltip(tooltip, { direction: "top", opacity: 0.9 });
 
         marker.on("click", () => {
-          // ✅ Notify Grafana of selected point
-          window.parent.postMessage({
-            type: "mapClick",
-            state: decodeURIComponent(d.state),
-            lat: d.lat,
-            long: d.long,
-            count: d.count,
-            label: decodeURIComponent(d.state)
-          }, "*");
-
-          // ✅ Update map view
-          userInteracted = true;
-          lastCenter = [d.lat, d.long];
-          lastZoom = 9;
-          map.flyTo(lastCenter, lastZoom, { duration: 0.6 });
+          if (selectedMarker === marker) {
+            // Deselect same marker → reset variables to all
+            selectedMarker = null;
+            window.parent.postMessage({
+              type: "mapClick",
+              state: "All",
+              lat: null,
+              long: null,
+              count: null,
+              label: "All"
+            }, "*");
+            marker.closeTooltip();
+          } else {
+            // Select new marker
+            selectedMarker = marker;
+            marker.openTooltip();
+            window.parent.postMessage({
+              type: "mapClick",
+              state: d.state,
+              lat: d.lat,
+              long: d.long,
+              count: d.count,
+              label: d.state
+            }, "*");
+          }
         });
 
         clusterGroup.addLayer(marker);
-        bounds.push([d.lat, d.long]);
       });
-
-      // ✅ Only auto-fit once
-      if (!userInteracted && bounds.length > 0) {
-        map.fitBounds(bounds, { padding: [30, 30] });
-      } else {
-        map.setView(lastCenter, lastZoom);
-      }
     }
 
-    // ============= Message Listener from Grafana =============
+    // ================= RECEIVE DATA =================
     window.addEventListener("message", (event) => {
       const msg = event.data;
-      if (msg?.incidentData && Array.isArray(msg.incidentData)) {
-        console.log("📩 Received", msg.incidentData.length, "records");
-        renderData(msg.incidentData);
+      if (msg?.type === "incidentData" && Array.isArray(msg.data)) {
+        console.log("📩 Received", msg.data.length, "records");
+        renderData(msg.data);
       }
     });
 
-    // ============= Back Button Handler =============
-    document.getElementById("backButton").addEventListener("click", () => {
-      console.log("🔙 Resetting map view");
-      userInteracted = false;
-      lastCenter = [23.8859, 45.0792];
-      lastZoom = 6;
-      map.flyTo(lastCenter, lastZoom, { duration: 0.8 });
-
-      // ✅ Notify Grafana that we cleared selection
-      window.parent.postMessage({
-        type: "updateVariable",
-        variable: "LOCATIONNAME",
-        value: "All"
-      }, "*");
-    });
-
-    console.log("🌍 Map ready, waiting for Grafana data...");
+    console.log("✅ Map ready, waiting for Grafana data...");
   </script>
 </body>
 </html>
