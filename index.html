@@ -1,106 +1,111 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-<meta charset="UTF-8" />
-<title>Incident Map</title>
-<link rel="stylesheet" href="https://unpkg.com/leaflet/dist/leaflet.css" />
-<link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster/dist/MarkerCluster.css" />
-<link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster/dist/MarkerCluster.Default.css" />
-<style>
-  html, body, #map { height: 100%; margin: 0; padding: 0; }
-  .leaflet-container {
-    cursor: default !important;
-  }
-  .leaflet-marker-icon {
-    cursor: pointer !important; /* Pointer only on marker */
-  }
-</style>
+  <meta charset="UTF-8">
+  <title>Incident Map</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <!-- Leaflet -->
+  <link
+    rel="stylesheet"
+    href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
+    integrity="sha256-sA+4Fj8ETbdrU0s8QnE7FqzLMd6Bj4uP7t1HjQj6RkA="
+    crossorigin=""
+  />
+  <script
+    src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
+    integrity="sha256-o9N1jzN3xv6xBz06vE4N2rQ6YxSgA5WQ9XZp3kzH4ik="
+    crossorigin=""
+  ></script>
+
+  <style>
+    html, body {
+      height: 100%;
+      margin: 0;
+      background-color: #f8f9fa;
+      overflow: hidden;
+    }
+    #map {
+      width: 100%;
+      height: 100%;
+    }
+    .leaflet-container {
+      cursor: default !important; /* 👈 normal arrow, no hand symbol */
+    }
+  </style>
 </head>
+
 <body>
-<div id="map"></div>
+  <div id="map"></div>
 
-<script src="https://unpkg.com/leaflet/dist/leaflet.js"></script>
-<script src="https://unpkg.com/leaflet.markercluster/dist/leaflet.markercluster.js"></script>
-<script>
-const map = L.map('map', {
-  zoomSnap: 0.25,
-  zoomDelta: 0.25,
-  maxZoom: 18,
-  minZoom: 3
-}).setView([24.7, 46.7], 6);
-
-// Add OpenStreetMap tiles
-L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-  attribution: '&copy; OpenStreetMap contributors'
-}).addTo(map);
-
-// Initialize cluster group
-let clusterGroup = L.markerClusterGroup({ chunkedLoading: true });
-map.addLayer(clusterGroup);
-
-// === Custom blue icon (bigger size)
-const blueIcon = L.divIcon({
-  html: `<div style="width:16px;height:16px;background:#007bff;border-radius:50%;border:2px solid white;"></div>`,
-  className: "",
-  iconSize: [16, 16]
-});
-
-// === Highlight (yellow) icon
-const yellowIcon = L.divIcon({
-  html: `<div style="width:20px;height:20px;background:yellow;border-radius:50%;border:3px solid #333;"></div>`,
-  className: "",
-  iconSize: [20, 20]
-});
-
-let selectedMarker = null;
-
-// === Handle incoming data from Grafana
-window.addEventListener("message", (event) => {
-  if (!event.data || event.data.type !== "incidentData") return;
-
-  const incidents = event.data.data;
-  clusterGroup.clearLayers();
-
-  incidents.forEach(d => {
-    const marker = L.marker([d.lat, d.lon], { icon: blueIcon });
-
-    marker.bindPopup(`<b>${decodeURIComponent(d.state)}</b><br>Count: ${d.count}`);
-
-    marker.on("click", () => {
-      // Toggle highlight
-      if (selectedMarker === marker) {
-        // Deselect
-        marker.setIcon(blueIcon);
-        selectedMarker = null;
-        // Send reset variable (All)
-        window.parent.postMessage({
-          type: "mapClick",
-          state: "All",
-          label: "All",
-          count: 0
-        }, "*");
-      } else {
-        // Reset old selection
-        if (selectedMarker) selectedMarker.setIcon(blueIcon);
-        // Highlight new one
-        marker.setIcon(yellowIcon);
-        selectedMarker = marker;
-
-        // Send selected location to Grafana
-        window.parent.postMessage({
-          type: "mapClick",
-          state: d.state,
-          label: decodeURIComponent(d.state),
-          count: d.count
-        }, "*");
-      }
+  <script>
+    // === Initialize Map ===
+    const map = L.map("map", {
+      center: [24.7, 46.7],
+      zoom: 6,
+      zoomControl: true,
     });
 
-    clusterGroup.addLayer(marker);
-  });
+    // === Base Tile Layer ===
+    L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
+      attribution: "© OpenStreetMap contributors",
+      maxZoom: 18,
+    }).addTo(map);
 
-  console.log(`✅ ${incidents.length} markers loaded`);
-});
-</script>
+    // Store globally for reuse
+    window.map = map;
+    window.markersLayer = L.layerGroup().addTo(map);
+
+    // === Receive data from Grafana ===
+    window.addEventListener("message", (event) => {
+      const data = event.data;
+      if (!data || data.type !== "incidentData") return;
+
+      console.log("✅ Received incident data:", data);
+
+      // Clear old markers
+      if (window.markersLayer) {
+        window.markersLayer.clearLayers();
+      }
+
+      // Add new markers
+      data.data.forEach((d) => {
+        const decodedName = decodeURIComponent(d.state);
+        const marker = L.circleMarker([d.lat, d.long], {
+          radius: 10, // 👈 Bigger blue dot
+          color: "#0055ff",
+          fillColor: "#3388ff",
+          fillOpacity: 0.8,
+          weight: 1,
+        }).addTo(window.markersLayer);
+
+        marker.bindTooltip(`${decodedName}<br>Count: ${d.count}`, {
+          permanent: false,
+          direction: "top",
+        });
+
+        // Send click info back to Grafana
+        marker.on("click", () => {
+          window.parent.postMessage(
+            {
+              type: "mapClick",
+              state: d.state,
+              lat: d.lat,
+              long: d.long,
+              count: d.count,
+              label: decodedName,
+            },
+            "*"
+          );
+        });
+      });
+
+      console.log("✅ Markers added:", data.data.length);
+    });
+
+    // === Safety: prevent hand cursor ===
+    map.on("mousemove", () => {
+      document.body.style.cursor = "default";
+    });
+  </script>
 </body>
 </html>
