@@ -1,148 +1,162 @@
 <!DOCTYPE html>
-<html>
-<head>
-  <title>Map Iframe</title>
-  <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width,initial-scale=1" />
-  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.3/dist/leaflet.css" />
-  <link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster/dist/MarkerCluster.css" />
-  <link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster/dist/MarkerCluster.Default.css" />
-  <style>
-    html, body, #map {
-      height: 100%;
-      margin: 0;
-      padding: 0;
-    }
-  </style>
-</head>
-<body>
-  <div id="map"></div>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>Saudi Arabia Incident Map</title>
 
-  <script src="https://unpkg.com/leaflet@1.9.3/dist/leaflet.js"></script>
-  <script src="https://unpkg.com/leaflet.markercluster/dist/leaflet.markercluster.js"></script>
+    <!-- Leaflet & Cluster CSS -->
+    <link
+      rel="stylesheet"
+      href="https://unpkg.com/leaflet@1.9.3/dist/leaflet.css"
+    />
+    <link
+      rel="stylesheet"
+      href="https://unpkg.com/leaflet.markercluster/dist/MarkerCluster.css"
+    />
+    <link
+      rel="stylesheet"
+      href="https://unpkg.com/leaflet.markercluster/dist/MarkerCluster.Default.css"
+    />
 
-  <script>
-    // ✅ Initialize map
-    const map = L.map("map");
-    const defaultCenter = [23.8859, 45.0792];
-    const defaultZoom = 6;
-
-    // ✅ Restore last map position if exists
-    const savedCenter = sessionStorage.getItem("mapCenter");
-    const savedZoom = sessionStorage.getItem("mapZoom");
-    if (savedCenter && savedZoom) {
-      const center = JSON.parse(savedCenter);
-      map.setView([center.lat, center.lng], parseInt(savedZoom));
-      console.log("Restored previous map view:", center, savedZoom);
-    } else {
-      map.setView(defaultCenter, defaultZoom);
-    }
-
-    // ✅ Save position before reload
-    window.addEventListener("beforeunload", () => {
-      const center = map.getCenter();
-      const zoom = map.getZoom();
-      sessionStorage.setItem("mapCenter", JSON.stringify(center));
-      sessionStorage.setItem("mapZoom", zoom);
-    });
-
-    // ✅ Tile layer
-    L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
-      maxZoom: 18,
-      attribution: "© OpenStreetMap contributors"
-    }).addTo(map);
-
-    const clusterGroup = L.markerClusterGroup();
-    map.addLayer(clusterGroup);
-
-    let markerDataMap = new Map();
-    let mapHasBeenFitted = false; // prevent refitting every refresh
-
-    // 🔹 Send variable update to Grafana
-    function sendVariableUpdate(variableName, variableValue) {
-      const payload = {
-        type: "updateVariable",
-        variable: variableName,
-        value: variableValue
-      };
-      console.log("Iframe: sending variable update request:", payload);
-      window.parent.postMessage(payload, "*");
-    }
-
-    // 🔹 Listen for incident data
-    window.addEventListener("message", (event) => {
-      console.log("Iframe: message received:", event.data);
-      const data = event.data;
-      if (!data || !data.incidentData) {
-        console.warn("Iframe: no incidentData in message");
-        return;
+    <style>
+      html,
+      body,
+      #map {
+        height: 100%;
+        margin: 0;
+        padding: 0;
       }
 
-      const arr = data.incidentData;
-      clusterGroup.clearLayers();
-      markerDataMap.clear();
+      .leaflet-tooltip {
+        background: rgba(0, 0, 0, 0.7);
+        color: white;
+        border: none;
+        border-radius: 5px;
+        font-size: 13px;
+        padding: 5px 8px;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="map"></div>
 
-      let bounds = [];
+    <!-- Leaflet & Cluster JS -->
+    <script src="https://unpkg.com/leaflet@1.9.3/dist/leaflet.js"></script>
+    <script src="https://unpkg.com/leaflet.markercluster/dist/leaflet.markercluster.js"></script>
 
-      arr.forEach((d, idx) => {
-        // ⚠️ Fix key name to match your SQL output (longitude not 'long')
-        const { state, lat, longitude, count } = d;
-        if (lat == null || longitude == null) return;
+    <script>
+      console.log("✅ Map initializing...");
 
-        const tooltip = `
-          <strong>State:</strong> ${state}<br/>
-          <strong>Lat:</strong> ${lat}<br/>
-          <strong>Long:</strong> ${longitude}<br/>
-          <strong>Count:</strong> ${count}
-        `;
+      // Create base map centered on Saudi Arabia
+      const map = L.map("map").setView([23.8859, 45.0792], 6);
 
-        const marker = L.marker([lat, longitude], { title: state });
-        marker.bindTooltip(tooltip, { direction: "top", permanent: false, opacity: 0.9 });
+      L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
+        maxZoom: 18,
+        attribution: "© OpenStreetMap contributors",
+      }).addTo(map);
 
-        // 🔹 On marker click: send updates
-        marker.on("click", () => {
-          const payload = {
-            type: "mapClick",
-            state: state,
-            lat: lat,
-            long: longitude,
-            count: count,
-            label: state
-          };
-          console.log("Iframe: marker clicked:", payload);
-          window.parent.postMessage(payload, "*");
-          sendVariableUpdate("LOCATIONNAME", state);
+      const clusterGroup = L.markerClusterGroup();
+      map.addLayer(clusterGroup);
+
+      // Store marker info
+      let markerDataMap = new Map();
+
+      // --- Function to send variable updates to Grafana parent ---
+      function sendVariableUpdate(variableName, variableValue) {
+        const payload = {
+          type: "updateVariable",
+          variable: variableName,
+          value: variableValue,
+        };
+        console.log("🛰️ Sending variable update:", payload);
+        window.parent.postMessage(payload, "*");
+      }
+
+      // --- Listen for incoming data from Grafana ---
+      window.addEventListener("message", (event) => {
+        const data = event.data;
+        console.log("📩 Received message from parent:", data);
+
+        if (!data || !data.incidentData) {
+          console.warn("⚠️ No incidentData found in message");
+          return;
+        }
+
+        const arr = data.incidentData;
+        clusterGroup.clearLayers();
+        markerDataMap.clear();
+
+        let bounds = [];
+
+        arr.forEach((d) => {
+          const { state, lat, long, count } = d;
+          if (lat == null || long == null) return;
+
+          // Tooltip HTML
+          const tooltip = `
+            <strong>Location:</strong> ${state}<br/>
+            <strong>Lat:</strong> ${lat}<br/>
+            <strong>Long:</strong> ${long}<br/>
+            <strong>Count:</strong> ${count}
+          `;
+
+          const marker = L.marker([lat, long], { title: state });
+          marker.bindTooltip(tooltip, {
+            direction: "top",
+            permanent: false,
+            opacity: 0.9,
+          });
+
+          // --- On marker click ---
+          marker.on("click", () => {
+            const payload = {
+              type: "mapClick",
+              state,
+              lat,
+              long,
+              count,
+              label: state,
+            };
+            console.log("📍 Marker clicked:", payload);
+
+            // Send generic click message
+            window.parent.postMessage(payload, "*");
+
+            // Delay variable update to prevent iframe reload
+            setTimeout(() => {
+              sendVariableUpdate("LOCATIONNAME", state);
+            }, 500);
+          });
+
+          clusterGroup.addLayer(marker);
+          bounds.push([lat, long]);
         });
 
-        clusterGroup.addLayer(marker);
-        bounds.push([lat, longitude]);
+        // Fit map to all markers
+        if (bounds.length > 0) {
+          const b = L.latLngBounds(bounds);
+          map.fitBounds(b, { padding: [40, 40] });
+        }
       });
 
-      // ✅ Fit only first time, not on every reload
-      if (!mapHasBeenFitted && bounds.length > 0) {
-        const b = L.latLngBounds(bounds);
-        map.fitBounds(b, { padding: [40, 40] });
-        mapHasBeenFitted = true;
-      }
-
-      // Cluster click popup only
+      // --- Cluster click (popup only, no variable update) ---
       clusterGroup.on("clusterclick", (a) => {
         const markers = a.layer.getAllChildMarkers();
         if (markers.length > 0) {
           const first = markers[0].getLatLng();
           const popup = `
             <strong>Cluster size:</strong> ${markers.length}<br/>
-            <strong>First state:</strong> ${markers[0].options.title}<br/>
-            <strong>Lat:</strong> ${first.lat}<br/>
-            <strong>Long:</strong> ${first.lng}
+            <strong>First location:</strong> ${markers[0].options.title}<br/>
+            <strong>Lat:</strong> ${first.lat.toFixed(4)}<br/>
+            <strong>Long:</strong> ${first.lng.toFixed(4)}
           `;
           L.popup().setLatLng(a.latlng).setContent(popup).openOn(map);
-          console.log("Iframe: cluster clicked (popup only)");
+          console.log("🧩 Cluster clicked (popup only)");
         }
       });
-    });
 
-    console.log("Iframe map initialized — waiting for Grafana message...");
-  </script>
-</body>
+      console.log("🌍 Map loaded and waiting for data...");
+    </script>
+  </body>
 </html>
