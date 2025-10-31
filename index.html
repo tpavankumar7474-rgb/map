@@ -4,33 +4,24 @@
   <meta charset="utf-8" />
   <title>Saudi Arabia Incident Map</title>
   <meta name="viewport" content="width=device-width,initial-scale=1" />
-
-  <!-- Leaflet & Cluster CSS -->
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.3/dist/leaflet.css" />
   <link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster/dist/MarkerCluster.css" />
   <link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster/dist/MarkerCluster.Default.css" />
-
   <style>
     html, body, #map {
       height: 100%;
       margin: 0;
       padding: 0;
     }
-
-    /* Optional: custom color for selected marker */
-    .selected-marker {
-      filter: hue-rotate(120deg) brightness(1.4);
-    }
   </style>
 </head>
 <body>
   <div id="map"></div>
 
-  <!-- Leaflet Scripts -->
   <script src="https://unpkg.com/leaflet@1.9.3/dist/leaflet.js"></script>
   <script src="https://unpkg.com/leaflet.markercluster/dist/leaflet.markercluster.js"></script>
-
   <script>
+    // ✅ Initialize map
     const map = L.map("map", { zoomControl: true }).setView([23.8859, 45.0792], 6);
     L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
       maxZoom: 18,
@@ -40,15 +31,16 @@
     const clusterGroup = L.markerClusterGroup({ chunkedLoading: true });
     map.addLayer(clusterGroup);
 
+    // ✅ Track selected marker
     let currentSelected = null;
-    let selectedMarker = null;
 
-    // ✅ Notify Grafana that iframe is ready
+    // ✅ Notify Grafana iframe is ready
     window.parent.postMessage({ type: "iframeReady" }, "*");
 
-    // ✅ Render data markers
+    // ✅ Render markers from Grafana data
     function renderData(arr) {
       if (!Array.isArray(arr) || arr.length === 0) return;
+
       clusterGroup.clearLayers();
 
       arr.forEach(d => {
@@ -62,18 +54,13 @@
         const marker = L.marker([d.lat, d.long]);
         marker.bindTooltip(tooltip, { direction: "top", opacity: 0.9 });
 
-        // 🖱️ Marker click → send to Grafana
-        marker.on("click", () => {
-          // If already selected → reset
+        // 🖱️ Click marker to select/deselect
+        marker.on("click", (e) => {
+          e.originalEvent.stopPropagation(); // prevent map click event
+
           if (currentSelected === d.state) {
+            // 🔁 Deselect → Reset to All
             currentSelected = null;
-
-            // Reset marker color
-            if (selectedMarker) {
-              selectedMarker.getElement()?.classList.remove("selected-marker");
-              selectedMarker = null;
-            }
-
             window.parent.postMessage({
               type: "mapClick",
               state: null,
@@ -81,19 +68,8 @@
               long: null
             }, "*");
           } else {
-            // Remove highlight from old marker
-            if (selectedMarker) {
-              selectedMarker.getElement()?.classList.remove("selected-marker");
-            }
-
+            // ✅ Select new marker
             currentSelected = d.state;
-            selectedMarker = marker;
-
-            // Highlight current marker
-            marker.once('add', () => {
-              marker.getElement()?.classList.add("selected-marker");
-            });
-
             window.parent.postMessage({
               type: "mapClick",
               state: d.state,
@@ -111,6 +87,19 @@
     window.addEventListener("message", (event) => {
       if (event.data?.type === "incidentData" && Array.isArray(event.data.data)) {
         renderData(event.data.data);
+      }
+    });
+
+    // ✅ Click anywhere else on map → reset
+    map.on("click", () => {
+      if (currentSelected !== null) {
+        currentSelected = null;
+        window.parent.postMessage({
+          type: "mapClick",
+          state: null,
+          lat: null,
+          long: null
+        }, "*");
       }
     });
   </script>
