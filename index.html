@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>Ultra-Fast Incident Map</title>
+<title>Saudi Arabia Incident Map</title>
 
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.3/dist/leaflet.css" />
 <style>
@@ -12,8 +12,6 @@
     margin: 0;
     padding: 0;
   }
-
-  /* Remove all hand/pointer cursors */
   #map, #map * {
     cursor: default !important;
   }
@@ -53,7 +51,7 @@
       const [lng, lat] = cluster.geometry.coordinates;
 
       if (cluster.properties.cluster) {
-        // Cluster
+        // Cluster point
         const count = cluster.properties.point_count;
         const size = Math.min(40, 10 + Math.log(count) * 5);
         const circle = L.circleMarker([lat, lng], {
@@ -64,14 +62,11 @@
           fillOpacity: 0.8,
           interactive: false
         }).bindTooltip(`${count} points`);
-
         circle.on("click", () => map.setView([lat, lng], zoom + 2));
         markersLayer.addLayer(circle);
       } else {
-        // Single point
         const { state, count } = cluster.properties;
         const isSelected = state === selectedState;
-
         const marker = L.circleMarker([lat, lng], {
           radius: 6,
           fillColor: isSelected ? YELLOW : BLUE,
@@ -79,7 +74,6 @@
           weight: 1,
           fillOpacity: 1
         });
-
         marker.on("click", () => handleMarkerClick(state, lat, lng, count));
         markersLayer.addLayer(marker);
       }
@@ -88,7 +82,6 @@
 
   function handleMarkerClick(state, lat, lng, count) {
     if (selectedState === state) {
-      // Deselect
       selectedState = null;
       window.parent.postMessage({
         type: "mapClick",
@@ -99,7 +92,6 @@
         count: "All"
       }, "*");
     } else {
-      // Select
       selectedState = state;
       window.parent.postMessage({
         type: "mapClick",
@@ -110,33 +102,53 @@
         count: count
       }, "*");
     }
-
     renderClusters();
   }
 
-  // Listen for data from Grafana
+  // 🔹 Grafana → HTML panel data listener
   window.addEventListener("message", (event) => {
-    const data = event.data;
-    if (!data || data.type !== "incidentData") return;
+    const payload = event.data;
+    if (!payload || !payload.series) return;
 
-    allPoints = data.lat.map((lat, i) => ({
-      type: "Feature",
-      geometry: { type: "Point", coordinates: [parseFloat(data.long[i]), parseFloat(lat)] },
-      properties: { state: decodeURIComponent(data.state[i]), count: data.count[i] }
-    }));
+    try {
+      const rows = payload.series[0].fields;
+      const state = rows.find(f => f.name.toLowerCase().includes("state"));
+      const lat = rows.find(f => f.name.toLowerCase().includes("lat"));
+      const long = rows.find(f => f.name.toLowerCase().includes("long"));
+      const count = rows.find(f => f.name.toLowerCase().includes("count"));
 
-    clusterIndex.load(allPoints);
+      const len = state.values.length;
+      allPoints = [];
 
-    if (allPoints.length > 0) {
-      const latLngs = allPoints.map(p => [p.geometry.coordinates[1], p.geometry.coordinates[0]]);
-      map.fitBounds(latLngs, { padding: [30, 30] });
+      for (let i = 0; i < len; i++) {
+        const s = state.values[i];
+        const la = parseFloat(lat.values[i]);
+        const lo = parseFloat(long.values[i]);
+        const c = count.values[i];
+
+        if (!isNaN(la) && !isNaN(lo)) {
+          allPoints.push({
+            type: "Feature",
+            geometry: { type: "Point", coordinates: [lo, la] },
+            properties: { state: s, count: c }
+          });
+        }
+      }
+
+      if (allPoints.length > 0) {
+        clusterIndex.load(allPoints);
+        const latLngs = allPoints.map(p => [p.geometry.coordinates[1], p.geometry.coordinates[0]]);
+        map.fitBounds(latLngs, { padding: [30, 30] });
+      }
+      renderClusters();
+      console.log(`✅ Loaded ${allPoints.length} points from query`);
+    } catch (e) {
+      console.error("Data parsing error:", e);
     }
-
-    renderClusters();
   });
 
   map.on("moveend", renderClusters);
-  console.log("🚀 Map ready for 100k+ points (No hand symbol)");
+  console.log("🚀 Saudi Arabia Map Ready for Dynamic Query Data");
 </script>
 </body>
 </html>
