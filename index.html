@@ -3,18 +3,13 @@
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>Incident Map</title>
+<title>Incident Map (Optimized)</title>
 
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.3/dist/leaflet.css" />
 <link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster/dist/MarkerCluster.css" />
 <link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster/dist/MarkerCluster.Default.css" />
-
 <style>
-  html, body, #map {
-    height: 100%;
-    margin: 0;
-    padding: 0;
-  }
+  html, body, #map { height: 100%; margin: 0; padding: 0; }
 </style>
 </head>
 <body>
@@ -23,28 +18,37 @@
 <script src="https://unpkg.com/leaflet@1.9.3/dist/leaflet.js"></script>
 <script src="https://unpkg.com/leaflet.markercluster/dist/leaflet.markercluster.js"></script>
 <script>
-  const map = L.map('map').setView([24.7136, 46.6753], 6);
+  const map = L.map('map', { preferCanvas: true }).setView([24.7136, 46.6753], 6);
 
   L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
     maxZoom: 18,
     attribution: '© OpenStreetMap contributors'
   }).addTo(map);
 
-  const markerCluster = L.markerClusterGroup({ disableClusteringAtZoom: 9 });
+  const markerCluster = L.markerClusterGroup({
+    disableClusteringAtZoom: 9,
+    chunkedLoading: true,          // ⚡ async chunked marker loading
+    chunkDelay: 25,                // slight delay between batches
+    chunkInterval: 200,            // milliseconds between chunks
+    chunkProgress: (processed, total, elapsed) => {
+      if (elapsed > 1000) {
+        console.log(`Processing markers: ${processed}/${total} (${Math.round(processed / total * 100)}%)`);
+      }
+    }
+  });
+
   map.addLayer(markerCluster);
 
   let markerDataMap = new Map();
   let currentDataHash = null;
+  let selectedMarker = null;
   let initialViewSet = false;
-  let selectedMarker = null; // store selected marker reference
 
-  // --- Marker Icons ---
   const defaultIcon = L.icon({
     iconUrl: "https://unpkg.com/leaflet@1.9.3/dist/images/marker-icon.png",
     shadowUrl: "https://unpkg.com/leaflet@1.9.3/dist/images/marker-shadow.png",
     iconSize: [25, 41],
-    iconAnchor: [12, 41],
-    shadowSize: [41, 41]
+    iconAnchor: [12, 41]
   });
 
   const yellowIcon = L.icon({
@@ -53,18 +57,74 @@
     iconAnchor: [16, 32]
   });
 
-  // --- Generate small hash to detect data change ---
   function generateDataHash(data) {
     if (!data || !data.lat) return null;
-    const d = {
-      len: data.lat.length,
-      first: data.lat[0] + "_" + data.long[0],
-      last: data.lat[data.lat.length - 1] + "_" + data.long[data.long.length - 1]
-    };
-    return JSON.stringify(d);
+    return data.lat.length + "_" + data.lat[0] + "_" + data.long[0];
   }
 
-  window.addEventListener('message', (event) => {
+  // === Optimized batched marker loader ===
+  function addMarkersInBatches(data, latLngs) {
+    const batchSize = 500; // adjust depending on data volume
+    let index = 0;
+
+    function processBatch() {
+      const end = Math.min(index + batchSize, data.lat.length);
+      for (let i = index; i < end; i++) {
+        const lat = parseFloat(data.lat[i]);
+        const lng = parseFloat(data.long[i]);
+        const label = decodeURIComponent(data.state[i]);
+        const count = data.count[i];
+        if (isNaN(lat) || isNaN(lng)) continue;
+
+        const marker = L.marker([lat, lng], { icon: defaultIcon });
+        marker.bindPopup(`${label}<br>Count: ${count}`);
+        const markerId = `${lat}_${lng}`;
+        markerDataMap.set(markerId, { state: data.state[i], lat, lng, label, count, marker });
+
+        marker.on("click", () => {
+          const markerData = markerDataMap.get(markerId);
+
+          // Toggle selection (yellow <-> default)
+          if (selectedMarker === marker) {
+            marker.setIcon(defaultIcon);
+            selectedMarker = null;
+            window.parent.postMessage({
+              type: "mapVariableReset",
+              LOCATIONNAME: "All",
+              Latitude: "All",
+              Longitude: "All"
+            }, "*");
+            return;
+          }
+
+          if (selectedMarker) selectedMarker.setIcon(defaultIcon);
+          marker.setIcon(yellowIcon);
+          selectedMarker = marker;
+
+          window.parent.postMessage({
+            type: "mapVariableUpdate",
+            LOCATIONNAME: markerData.state,
+            Latitude: markerData.lat,
+            Longitude: markerData.lng
+          }, "*");
+        });
+
+        markerCluster.addLayer(marker);
+        latLngs.push([lat, lng]);
+      }
+
+      index = end;
+      if (index < data.lat.length) {
+        requestAnimationFrame(processBatch);
+      } else {
+        console.log("✅ All markers added!");
+      }
+    }
+
+    requestAnimationFrame(processBatch);
+  }
+
+  window.addEventListener("message", (event) => {
     const data = event.data;
     if (!data || !data.lat || !data.long || !data.state) return;
 
@@ -72,74 +132,22 @@
     if (newHash === currentDataHash) return;
     currentDataHash = newHash;
 
-    // Store current view
     const currentCenter = map.getCenter();
     const currentZoom = map.getZoom();
     const shouldSetInitialView = !initialViewSet;
 
-    // Clear previous markers
     markerCluster.clearLayers();
     markerDataMap.clear();
     selectedMarker = null;
 
     const latLngs = [];
+    addMarkersInBatches(data, latLngs);
 
-    for (let i = 0; i < data.lat.length; i++) {
-      const lat = parseFloat(data.lat[i]);
-      const lng = parseFloat(data.long[i]);
-      const label = decodeURIComponent(data.state[i]);
-      const count = data.count[i];
-      if (isNaN(lat) || isNaN(lng)) continue;
-
-      const marker = L.marker([lat, lng], { icon: defaultIcon });
-      marker.bindPopup(`${label}<br>Count: ${count}`);
-
-      const markerId = `${lat}_${lng}`;
-      markerDataMap.set(markerId, { state: data.state[i], lat, lng, label, count, marker });
-
-      marker.on('click', (e) => {
-        L.DomEvent.stopPropagation(e);
-        const markerData = markerDataMap.get(markerId);
-
-        // If clicked again on same selected marker → reset
-        if (selectedMarker === marker) {
-          marker.setIcon(defaultIcon);
-          selectedMarker = null;
-
-          window.parent.postMessage({
-            type: 'mapVariableReset',
-            LOCATIONNAME: "All",
-            Latitude: "All",
-            Longitude: "All"
-          }, "*");
-          console.log("Marker deselected → Variables reset to All");
-          return;
-        }
-
-        // Deselect previous
-        if (selectedMarker) selectedMarker.setIcon(defaultIcon);
-
-        // Select this one
-        marker.setIcon(yellowIcon);
-        selectedMarker = marker;
-
-        window.parent.postMessage({
-          type: 'mapVariableUpdate',
-          LOCATIONNAME: markerData.state,
-          Latitude: markerData.lat,
-          Longitude: markerData.lng
-        }, "*");
-
-        console.log("Marker selected → Variables updated", markerData);
-      });
-
-      markerCluster.addLayer(marker);
-      latLngs.push([lat, lng]);
-    }
-
-    // === Set or preserve view ===
-    if (shouldSetInitialView && latLngs.length > 0) {
-      if (latLngs.length === 1) map.setView(latLngs[0], 10);
+    // Fast-fit bounds only once
+    if (shouldSetInitialView && data.lat.length > 0) {
+      const firstLat = parseFloat(data.lat[0]);
+      const firstLng = parseFloat(data.long[0]);
+      if (data.lat.length === 1) map.setView([firstLat, firstLng], 10);
       else map.fitBounds(latLngs, { padding: [30, 30] });
       initialViewSet = true;
     } else {
@@ -147,7 +155,7 @@
     }
   });
 
-  console.log("Map ready — waiting for data...");
+  console.log("🚀 Optimized map ready — waiting for Grafana data...");
 </script>
 </body>
 </html>
