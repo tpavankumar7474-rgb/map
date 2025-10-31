@@ -4,25 +4,37 @@
   <meta charset="utf-8" />
   <title>Saudi Arabia Incident Map</title>
   <meta name="viewport" content="width=device-width,initial-scale=1" />
+
+  <!-- Leaflet + Cluster CSS -->
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.3/dist/leaflet.css" />
   <link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster/dist/MarkerCluster.css" />
   <link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster/dist/MarkerCluster.Default.css" />
+
   <style>
     html, body, #map {
       height: 100%;
       margin: 0;
       padding: 0;
     }
+    .leaflet-tooltip {
+      background: rgba(255, 255, 255, 0.95);
+      color: #000;
+      font-weight: bold;
+      border-radius: 4px;
+      padding: 5px 8px;
+      font-size: 13px;
+    }
   </style>
 </head>
 <body>
   <div id="map"></div>
 
+  <!-- Leaflet + Cluster JS -->
   <script src="https://unpkg.com/leaflet@1.9.3/dist/leaflet.js"></script>
   <script src="https://unpkg.com/leaflet.markercluster/dist/leaflet.markercluster.js"></script>
 
   <script>
-    // ==================== INITIALIZE MAP ====================
+    // ===================== Initialize Map =====================
     const map = L.map("map", { zoomControl: true }).setView([23.8859, 45.0792], 6);
 
     L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
@@ -33,26 +45,31 @@
     const clusterGroup = L.markerClusterGroup();
     map.addLayer(clusterGroup);
 
-    let currentZoomBounds = L.latLngBounds([[16, 34], [32, 56]]);
     let lastDataHash = null;
     let userInteracted = false;
+    let lastZoom = map.getZoom();
+    let lastCenter = map.getCenter();
 
-    // Track user interaction (so we don't reset zoom automatically)
-    map.on('zoomstart moveend', () => { userInteracted = true; });
+    // Track zoom & movement to remember user state
+    map.on('zoomend moveend', () => {
+      userInteracted = true;
+      lastZoom = map.getZoom();
+      lastCenter = map.getCenter();
+    });
 
-    // ==================== HASH FUNCTION (to prevent reloads) ====================
+    // ===================== Hash Function (For Change Detection) =====================
     function hashData(arr) {
       return arr.map(d => `${d.state}|${d.lat}|${d.long}|${d.count}`).join(",");
     }
 
-    // ==================== RENDER INCIDENT DATA ====================
+    // ===================== Render Data =====================
     function renderData(arr) {
       const newHash = hashData(arr);
       if (newHash === lastDataHash) return;
       lastDataHash = newHash;
 
       clusterGroup.clearLayers();
-      let bounds = [];
+      const bounds = [];
 
       arr.forEach(d => {
         if (!d.lat || !d.long) return;
@@ -61,12 +78,11 @@
           <strong>المحافظة:</strong> ${d.state}<br/>
           <strong>عدد الحوادث:</strong> ${d.count}
         `;
-
         const marker = L.marker([d.lat, d.long]);
         marker.bindTooltip(tooltip, { direction: "top", opacity: 0.9 });
 
-        // ✅ When marker is clicked — send data to Grafana
         marker.on("click", () => {
+          // Send clicked info to Grafana
           window.parent.postMessage({
             type: "mapClick",
             state: d.state,
@@ -76,30 +92,35 @@
             label: d.state
           }, "*");
 
-          map.flyTo([d.lat, d.long], 9, { duration: 0.6 });
+          lastZoom = 9;
+          lastCenter = [d.lat, d.long];
+          map.flyTo(lastCenter, lastZoom, { duration: 0.8 });
         });
 
         clusterGroup.addLayer(marker);
         bounds.push([d.lat, d.long]);
       });
 
-      // Fit bounds only if user hasn’t zoomed or moved manually
+      // ✅ Retain user zoom & position even after data reload
       if (!userInteracted && bounds.length > 0) {
-        map.fitBounds(bounds, { padding: [30, 30] });
-        currentZoomBounds = L.latLngBounds(bounds);
+        if (lastCenter && lastZoom) {
+          map.setView(lastCenter, lastZoom);
+        } else {
+          map.fitBounds(bounds, { padding: [30, 30] });
+        }
       }
     }
 
-    // ==================== LISTEN FOR GRAFANA DATA ====================
+    // ===================== Listen for Grafana Messages =====================
     window.addEventListener("message", (event) => {
       const msg = event.data;
       if (msg?.incidentData) {
-        console.log("✅ Received", msg.incidentData.length, "records from Grafana");
+        console.log("✅ Received", msg.incidentData.length, "records");
         renderData(msg.incidentData);
       }
     });
 
-    console.log("🌍 Map ready and waiting for Grafana data...");
+    console.log("🌍 Map initialized and waiting for Grafana data...");
   </script>
 </body>
 </html>
