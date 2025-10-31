@@ -13,6 +13,12 @@
       margin: 0;
       padding: 0;
     }
+    .leaflet-tooltip {
+      background: white;
+      color: black;
+      border: 1px solid #999;
+      font-size: 13px;
+    }
   </style>
 </head>
 <body>
@@ -31,11 +37,12 @@
     map.addLayer(clusterGroup);
 
     let currentSelected = null;
+    const defaultIcon = new L.Icon.Default();
 
-    // 🧠 Tell Grafana iframe is ready
+    // 🔹 Notify Grafana that map is ready
     window.parent.postMessage({ type: "iframeReady" }, "*");
 
-    // ✅ Render incoming incident data
+    // 🔹 Render markers
     function renderData(arr) {
       if (!Array.isArray(arr) || arr.length === 0) return;
       clusterGroup.clearLayers();
@@ -43,18 +50,18 @@
       arr.forEach(d => {
         if (!d.lat || !d.long) return;
 
+        const marker = L.marker([d.lat, d.long], { icon: defaultIcon });
         const tooltip = `
-          <strong>المحافظة:</strong> ${d.state}<br/>
-          <strong>عدد الحوادث:</strong> ${d.count}
+          <strong>Governorate:</strong> ${d.state}<br/>
+          <strong>Count:</strong> ${d.count}<br/>
+          <strong>Lat:</strong> ${d.lat}<br/>
+          <strong>Long:</strong> ${d.long}
         `;
-
-        const marker = L.marker([d.lat, d.long]);
         marker.bindTooltip(tooltip, { direction: "top", opacity: 0.9 });
 
-        // 🧩 Click → send LOCATIONNAME, Latitude, Longitude
         marker.on("click", () => {
           if (currentSelected === d.state) {
-            // 🔁 Deselect → reset all to "All"
+            // 🟢 Deselect (reset all)
             currentSelected = null;
             window.parent.postMessage({
               type: "updateVariable",
@@ -63,7 +70,7 @@
               long: "All"
             }, "*");
           } else {
-            // ✅ Select → send actual values
+            // 🟣 Select marker and update variables
             currentSelected = d.state;
             window.parent.postMessage({
               type: "updateVariable",
@@ -78,7 +85,7 @@
       });
     }
 
-    // ✅ Listen for incident data from Grafana
+    // 🔹 Listen for data from Grafana
     window.addEventListener("message", (event) => {
       if (event.data?.type === "incidentData" && Array.isArray(event.data.data)) {
         renderData(event.data.data);
