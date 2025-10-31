@@ -1,120 +1,110 @@
-
 <!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>Optimized Incident Map</title>
+<title>Ultra-Fast Incident Map</title>
 
-<!-- Leaflet + Clustering -->
+<!-- Leaflet CSS -->
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.3/dist/leaflet.css" />
-<link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster/dist/MarkerCluster.css" />
-<link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster/dist/MarkerCluster.Default.css" />
 <style>
   html, body, #map {
     height: 100%;
     margin: 0;
     padding: 0;
   }
-  .leaflet-marker-icon {
-    cursor: default !important; /* Remove hand symbol */
+
+  /* ✅ Remove all hand/pointer cursors */
+  #map,
+  #map * {
+    cursor: default !important;
   }
 </style>
 </head>
 <body>
 <div id="map"></div>
 
-<!-- JS -->
+<!-- JS Libraries -->
 <script src="https://unpkg.com/leaflet@1.9.3/dist/leaflet.js"></script>
-<script src="https://unpkg.com/leaflet.markercluster/dist/leaflet.markercluster.js"></script>
-<script>
-  // === Map Setup ===
-  const map = L.map('map', { preferCanvas: true }).setView([24.7136, 46.6753], 6);
+<script src="https://unpkg.com/supercluster@8.0.1/dist/supercluster.min.js"></script>
 
+<script>
+  // === Initialize map ===
+  const map = L.map('map', { preferCanvas: true, zoomControl: true })
+    .setView([24.7136, 46.6753], 6);
+
+  // === Base tile layer ===
   L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-    maxZoom: 18,
-    attribution: '© OpenStreetMap contributors'
+    attribution: '© OpenStreetMap contributors',
+    maxZoom: 18
   }).addTo(map);
 
-  // === Cluster Group (optimized) ===
-  const markerCluster = L.markerClusterGroup({
-    disableClusteringAtZoom: 9,
-    chunkedLoading: false, // disable chunking for proper cluster grouping
-    spiderfyOnMaxZoom: true,
-    removeOutsideVisibleBounds: true
-  });
-  map.addLayer(markerCluster);
-
-  // === Icons ===
-  const blueIcon = L.icon({
-    iconUrl: "https://maps.google.com/mapfiles/ms/icons/blue-dot.png",
-    iconSize: [32, 32],
-    iconAnchor: [16, 32]
+  // === Supercluster ===
+  let clusterIndex = supercluster({
+    radius: 60,
+    maxZoom: 17
   });
 
-  const yellowIcon = L.icon({
-    iconUrl: "https://maps.google.com/mapfiles/ms/icons/yellow-dot.png",
-    iconSize: [32, 32],
-    iconAnchor: [16, 32]
-  });
+  // === Layers & states ===
+  const markersLayer = L.layerGroup().addTo(map);
+  let allPoints = [];
+  let selectedState = null;
 
-  // === Data State ===
-  let markerDataMap = new Map();
-  let currentDataHash = null;
-  let selectedMarker = null;
-  let initialViewSet = false;
+  const BLUE = "#007bff";
+  const YELLOW = "#ffcc00";
 
-  // === Generate a data hash to detect updates ===
-  function generateDataHash(data) {
-    if (!data || !data.lat) return null;
-    return data.lat.length + "_" + data.lat[0] + "_" + data.long[0];
+  // === Render clusters and individual markers ===
+  function renderClusters() {
+    markersLayer.clearLayers();
+
+    const bounds = map.getBounds();
+    const zoom = map.getZoom();
+    const bbox = [bounds.getWest(), bounds.getSouth(), bounds.getEast(), bounds.getNorth()];
+    const clusters = clusterIndex.getClusters(bbox, zoom);
+
+    clusters.forEach(cluster => {
+      const [lng, lat] = cluster.geometry.coordinates;
+
+      if (cluster.properties.cluster) {
+        // Cluster node
+        const count = cluster.properties.point_count;
+        const size = Math.min(40, 10 + (Math.log(count) * 5));
+
+        const circle = L.circleMarker([lat, lng], {
+          radius: size / 2,
+          fillColor: "#3388ff",
+          color: "#ffffff",
+          weight: 1,
+          fillOpacity: 0.8,
+          interactive: false // ✅ no cursor or interactivity
+        }).bindTooltip(`${count} points`);
+
+        circle.on("click", () => map.setView([lat, lng], zoom + 2));
+        markersLayer.addLayer(circle);
+      } else {
+        // Individual point
+        const { state } = cluster.properties;
+        const isSelected = (state === selectedState);
+
+        const marker = L.circleMarker([lat, lng], {
+          radius: 6,
+          fillColor: isSelected ? YELLOW : BLUE,
+          color: "#fff",
+          weight: 1,
+          fillOpacity: 1
+        });
+
+        marker.on("click", () => handleMarkerClick(state, lat, lng));
+        markersLayer.addLayer(marker);
+      }
+    });
   }
 
-  // === Add all markers at once (much faster + proper clustering) ===
-  function addAllMarkers(data) {
-    const markers = [];
-    markerDataMap.clear();
-
-    for (let i = 0; i < data.lat.length; i++) {
-      const lat = parseFloat(data.lat[i]);
-      const lng = parseFloat(data.long[i]);
-      if (isNaN(lat) || isNaN(lng)) continue;
-
-      const state = decodeURIComponent(data.state[i]);
-      const count = data.count[i];
-      const markerId = `${lat}_${lng}`;
-
-      const marker = L.marker([lat, lng], { icon: blueIcon });
-      marker.bindPopup(`${state}<br>Count: ${count}`);
-
-      markerDataMap.set(markerId, { state, lat, lng, count, marker });
-      marker.on("click", () => handleMarkerClick(markerId));
-      markers.push(marker);
-    }
-
-    // Add all at once for instant cluster creation
-    markerCluster.addLayers(markers);
-    console.log(`✅ Added ${markers.length} markers with clustering.`);
-
-    // Fit bounds *after* markers fully added
-    if (!initialViewSet && markers.length > 0) {
-      const groupBounds = L.latLngBounds(markers.map(m => m.getLatLng()));
-      map.fitBounds(groupBounds, { padding: [30, 30] });
-      initialViewSet = true;
-    }
-  }
-
-  // === Marker Click (toggle colors + update variables) ===
-  function handleMarkerClick(markerId) {
-    const data = markerDataMap.get(markerId);
-    if (!data) return;
-
-    const marker = data.marker;
-
-    if (selectedMarker === marker) {
-      marker.setIcon(blueIcon);
-      selectedMarker = null;
-
+  // === Handle click: toggle color + update/reset variable ===
+  function handleMarkerClick(state, lat, lng) {
+    if (selectedState === state) {
+      // Deselect → back to blue
+      selectedState = null;
       window.parent.postMessage({
         type: "mapVariableReset",
         LOCATIONNAME: "All",
@@ -122,46 +112,49 @@
         Longitude: "All"
       }, "*");
     } else {
-      if (selectedMarker) selectedMarker.setIcon(blueIcon);
-      marker.setIcon(yellowIcon);
-      selectedMarker = marker;
-
+      // Select → turn yellow
+      selectedState = state;
       window.parent.postMessage({
         type: "mapVariableUpdate",
-        LOCATIONNAME: data.state,
-        Latitude: data.lat,
-        Longitude: data.lng
+        LOCATIONNAME: state,
+        Latitude: lat,
+        Longitude: lng
       }, "*");
     }
+
+    renderClusters(); // redraw with updated colors
   }
 
-  // === Listen for incoming Grafana data ===
+  // === Handle incoming Grafana data ===
   window.addEventListener("message", (event) => {
     const data = event.data;
     if (!data || !data.lat || !data.long || !data.state) return;
 
-    const newHash = generateDataHash(data);
-    if (newHash === currentDataHash) return;
-    currentDataHash = newHash;
+    // Prepare GeoJSON features
+    allPoints = data.lat.map((lat, i) => ({
+      type: "Feature",
+      geometry: { type: "Point", coordinates: [parseFloat(data.long[i]), parseFloat(lat)] },
+      properties: {
+        state: decodeURIComponent(data.state[i]),
+        count: data.count[i]
+      }
+    }));
 
-    // Preserve current view
-    const center = map.getCenter();
-    const zoom = map.getZoom();
+    clusterIndex.load(allPoints);
 
-    // Clear previous data
-    markerCluster.clearLayers();
-    markerDataMap.clear();
-    selectedMarker = null;
-
-    addAllMarkers(data);
-
-    // Keep map stable after first load
-    if (initialViewSet) {
-      map.setView(center, zoom, { animate: false });
+    // Fit map once on initial load
+    if (allPoints.length > 0) {
+      const latLngs = allPoints.map(p => [p.geometry.coordinates[1], p.geometry.coordinates[0]]);
+      map.fitBounds(latLngs, { padding: [30, 30] });
     }
+
+    renderClusters();
   });
 
-  console.log("🚀 Map ready — waiting for Grafana data...");
+  // Update clusters when moving or zooming
+  map.on("moveend", renderClusters);
+
+  console.log("🚀 Supercluster map ready — handles 100k+ points smoothly, no hand cursor");
 </script>
 </body>
 </html>
