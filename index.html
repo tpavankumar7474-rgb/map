@@ -1,27 +1,23 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8">
+  <meta charset="UTF-8" />
   <title>Incident Map</title>
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+
   <!-- Leaflet -->
   <link
     rel="stylesheet"
     href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
-    integrity="sha256-sA+4Fj8ETbdrU0s8QnE7FqzLMd6Bj4uP7t1HjQj6RkA="
-    crossorigin=""
   />
-  <script
-    src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
-    integrity="sha256-o9N1jzN3xv6xBz06vE4N2rQ6YxSgA5WQ9XZp3kzH4ik="
-    crossorigin=""
-  ></script>
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 
   <style>
     html, body {
       height: 100%;
       margin: 0;
-      background-color: #f8f9fa;
+      padding: 0;
+      background: #eef2f3;
       overflow: hidden;
     }
     #map {
@@ -29,7 +25,7 @@
       height: 100%;
     }
     .leaflet-container {
-      cursor: default !important; /* 👈 normal arrow, no hand symbol */
+      cursor: default !important;
     }
   </style>
 </head>
@@ -40,22 +36,22 @@
   <script>
     // === Initialize Map ===
     const map = L.map("map", {
-      center: [24.7, 46.7],
+      center: [24.7136, 46.6753], // Saudi Arabia center
       zoom: 6,
       zoomControl: true,
+      attributionControl: false
     });
 
-    // === Base Tile Layer ===
+    // === Base Layer (Fast OpenStreetMap tiles) ===
     L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
-      attribution: "© OpenStreetMap contributors",
       maxZoom: 18,
+      minZoom: 3,
     }).addTo(map);
 
-    // Store globally for reuse
-    window.map = map;
-    window.markersLayer = L.layerGroup().addTo(map);
+    // === Layer for markers ===
+    const markersLayer = L.layerGroup().addTo(map);
 
-    // === Receive data from Grafana ===
+    // === Handle Data from Grafana ===
     window.addEventListener("message", (event) => {
       const data = event.data;
       if (!data || data.type !== "incidentData") return;
@@ -63,46 +59,48 @@
       console.log("✅ Received incident data:", data);
 
       // Clear old markers
-      if (window.markersLayer) {
-        window.markersLayer.clearLayers();
-      }
+      markersLayer.clearLayers();
 
       // Add new markers
-      data.data.forEach((d) => {
-        const decodedName = decodeURIComponent(d.state);
-        const marker = L.circleMarker([d.lat, d.long], {
-          radius: 10, // 👈 Bigger blue dot
+      data.lat.forEach((lat, idx) => {
+        const long = data.long[idx];
+        const state = decodeURIComponent(data.state[idx]);
+        const count = data.count[idx];
+
+        if (!lat || !long) return;
+
+        const marker = L.circleMarker([lat, long], {
+          radius: 10, // 🔵 Big blue dot
           color: "#0055ff",
           fillColor: "#3388ff",
-          fillOpacity: 0.8,
+          fillOpacity: 0.9,
           weight: 1,
-        }).addTo(window.markersLayer);
+        }).addTo(markersLayer);
 
-        marker.bindTooltip(`${decodedName}<br>Count: ${d.count}`, {
+        marker.bindTooltip(`${state}<br>Count: ${count}`, {
           permanent: false,
           direction: "top",
         });
 
-        // Send click info back to Grafana
         marker.on("click", () => {
           window.parent.postMessage(
             {
               type: "mapClick",
-              state: d.state,
-              lat: d.lat,
-              long: d.long,
-              count: d.count,
-              label: decodedName,
+              state: encodeURIComponent(state),
+              lat: lat,
+              long: long,
+              count: count,
+              label: state,
             },
             "*"
           );
         });
       });
 
-      console.log("✅ Markers added:", data.data.length);
+      console.log(`✅ Markers added: ${data.lat.length}`);
     });
 
-    // === Safety: prevent hand cursor ===
+    // === Prevent hand cursor ===
     map.on("mousemove", () => {
       document.body.style.cursor = "default";
     });
