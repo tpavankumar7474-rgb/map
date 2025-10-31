@@ -13,13 +13,6 @@
       margin: 0;
       padding: 0;
     }
-    .leaflet-tooltip {
-      background: rgba(0, 0, 0, 0.8);
-      color: #fff;
-      font-size: 13px;
-      border-radius: 6px;
-      padding: 5px 8px;
-    }
   </style>
 </head>
 <body>
@@ -27,34 +20,24 @@
 
   <script src="https://unpkg.com/leaflet@1.9.3/dist/leaflet.js"></script>
   <script src="https://unpkg.com/leaflet.markercluster/dist/leaflet.markercluster.js"></script>
-
   <script>
-    // ================= INIT MAP =================
     const map = L.map("map", { zoomControl: true }).setView([23.8859, 45.0792], 6);
     L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
       maxZoom: 18,
       attribution: "© OpenStreetMap contributors"
     }).addTo(map);
 
-    const clusterGroup = L.markerClusterGroup({ disableClusteringAtZoom: 9 });
+    const clusterGroup = L.markerClusterGroup({ chunkedLoading: true });
     map.addLayer(clusterGroup);
 
-    let selectedMarker = null; // to track selected marker
-    let lastDataHash = null;
+    let currentSelected = null;
 
-    // ================= HELPER =================
-    function hashData(arr) {
-      return arr.map(d => `${d.state}|${d.lat}|${d.long}|${d.count}`).join(",");
-    }
+    // 🧠 Send ready message immediately
+    window.parent.postMessage({ type: "iframeReady" }, "*");
 
-    // ================= RENDER DATA =================
+    // ✅ Render Data (no reload, no reposition)
     function renderData(arr) {
       if (!Array.isArray(arr) || arr.length === 0) return;
-
-      const newHash = hashData(arr);
-      if (newHash === lastDataHash) return;
-      lastDataHash = newHash;
-
       clusterGroup.clearLayers();
 
       arr.forEach(d => {
@@ -68,30 +51,23 @@
         const marker = L.marker([d.lat, d.long]);
         marker.bindTooltip(tooltip, { direction: "top", opacity: 0.9 });
 
+        // 🧩 Click marker → update variable (no fly, no zoom)
         marker.on("click", () => {
-          if (selectedMarker === marker) {
-            // Deselect same marker → reset variables to all
-            selectedMarker = null;
+          if (currentSelected === d.state) {
+            // deselect (reset to All)
+            currentSelected = null;
             window.parent.postMessage({
-              type: "mapClick",
-              state: "All",
-              lat: null,
-              long: null,
-              count: null,
-              label: "All"
+              type: "updateVariable",
+              variable: "selected_state",
+              value: "All"
             }, "*");
-            marker.closeTooltip();
+            marker.setIcon(defaultIcon);
           } else {
-            // Select new marker
-            selectedMarker = marker;
-            marker.openTooltip();
+            currentSelected = d.state;
             window.parent.postMessage({
-              type: "mapClick",
-              state: d.state,
-              lat: d.lat,
-              long: d.long,
-              count: d.count,
-              label: d.state
+              type: "updateVariable",
+              variable: "selected_state",
+              value: d.state
             }, "*");
           }
         });
@@ -100,16 +76,12 @@
       });
     }
 
-    // ================= RECEIVE DATA =================
+    // ✅ Receive data from Grafana
     window.addEventListener("message", (event) => {
-      const msg = event.data;
-      if (msg?.type === "incidentData" && Array.isArray(msg.data)) {
-        console.log("📩 Received", msg.data.length, "records");
-        renderData(msg.data);
+      if (event.data?.type === "incidentData" && Array.isArray(event.data.data)) {
+        renderData(event.data.data);
       }
     });
-
-    console.log("✅ Map ready, waiting for Grafana data...");
   </script>
 </body>
 </html>
