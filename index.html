@@ -4,39 +4,26 @@
   <meta charset="utf-8" />
   <title>Saudi Arabia Incident Map</title>
   <meta name="viewport" content="width=device-width,initial-scale=1" />
-
-  <!-- Leaflet + Cluster CSS -->
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.3/dist/leaflet.css" />
   <link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster/dist/MarkerCluster.css" />
   <link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster/dist/MarkerCluster.Default.css" />
-
   <style>
     html, body, #map {
       height: 100%;
       margin: 0;
       padding: 0;
     }
-    .leaflet-tooltip {
-      background: rgba(255, 255, 255, 0.95);
-      color: #000;
-      font-weight: bold;
-      border-radius: 4px;
-      padding: 5px 8px;
-      font-size: 13px;
-    }
   </style>
 </head>
 <body>
   <div id="map"></div>
 
-  <!-- Leaflet + Cluster JS -->
   <script src="https://unpkg.com/leaflet@1.9.3/dist/leaflet.js"></script>
   <script src="https://unpkg.com/leaflet.markercluster/dist/leaflet.markercluster.js"></script>
 
   <script>
-    // ===================== Initialize Map =====================
+    // ============= Initialize Map =============
     const map = L.map("map", { zoomControl: true }).setView([23.8859, 45.0792], 6);
-
     L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
       maxZoom: 18,
       attribution: "© OpenStreetMap contributors"
@@ -45,31 +32,32 @@
     const clusterGroup = L.markerClusterGroup();
     map.addLayer(clusterGroup);
 
+    // Track last map position & zoom
+    let lastCenter = map.getCenter();
+    let lastZoom = map.getZoom();
     let lastDataHash = null;
     let userInteracted = false;
-    let lastZoom = map.getZoom();
-    let lastCenter = map.getCenter();
 
-    // Track zoom & movement to remember user state
-    map.on('zoomend moveend', () => {
-      userInteracted = true;
-      lastZoom = map.getZoom();
+    map.on("moveend zoomend", () => {
       lastCenter = map.getCenter();
+      lastZoom = map.getZoom();
+      userInteracted = true;
     });
 
-    // ===================== Hash Function (For Change Detection) =====================
+    // ============= Render Data =============
     function hashData(arr) {
       return arr.map(d => `${d.state}|${d.lat}|${d.long}|${d.count}`).join(",");
     }
 
-    // ===================== Render Data =====================
     function renderData(arr) {
+      if (!Array.isArray(arr) || arr.length === 0) return;
+
       const newHash = hashData(arr);
-      if (newHash === lastDataHash) return;
+      if (newHash === lastDataHash) return; // skip if same data
       lastDataHash = newHash;
 
       clusterGroup.clearLayers();
-      const bounds = [];
+      let bounds = [];
 
       arr.forEach(d => {
         if (!d.lat || !d.long) return;
@@ -78,11 +66,11 @@
           <strong>المحافظة:</strong> ${d.state}<br/>
           <strong>عدد الحوادث:</strong> ${d.count}
         `;
+
         const marker = L.marker([d.lat, d.long]);
         marker.bindTooltip(tooltip, { direction: "top", opacity: 0.9 });
 
         marker.on("click", () => {
-          // Send clicked info to Grafana
           window.parent.postMessage({
             type: "mapClick",
             state: d.state,
@@ -92,35 +80,33 @@
             label: d.state
           }, "*");
 
-          lastZoom = 9;
+          map.flyTo([d.lat, d.long], 9, { duration: 0.5 });
           lastCenter = [d.lat, d.long];
-          map.flyTo(lastCenter, lastZoom, { duration: 0.8 });
+          lastZoom = 9;
         });
 
         clusterGroup.addLayer(marker);
         bounds.push([d.lat, d.long]);
       });
 
-      // ✅ Retain user zoom & position even after data reload
+      // 🧠 Only reset map view on first render
       if (!userInteracted && bounds.length > 0) {
-        if (lastCenter && lastZoom) {
-          map.setView(lastCenter, lastZoom);
-        } else {
-          map.fitBounds(bounds, { padding: [30, 30] });
-        }
+        map.fitBounds(bounds, { padding: [30, 30] });
+      } else {
+        map.setView(lastCenter, lastZoom);
       }
     }
 
-    // ===================== Listen for Grafana Messages =====================
+    // ============= Receive Data from Grafana =============
     window.addEventListener("message", (event) => {
       const msg = event.data;
-      if (msg?.incidentData) {
-        console.log("✅ Received", msg.incidentData.length, "records");
-        renderData(msg.incidentData);
+      if (msg?.type === "incidentData" && Array.isArray(msg.data)) {
+        console.log("📩 Received", msg.data.length, "records");
+        renderData(msg.data);
       }
     });
 
-    console.log("🌍 Map initialized and waiting for Grafana data...");
+    console.log("🌍 Map ready, waiting for Grafana data...");
   </script>
 </body>
 </html>
