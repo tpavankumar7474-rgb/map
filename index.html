@@ -1,154 +1,124 @@
 <!DOCTYPE html>
-<html lang="en">
+<html>
 <head>
-<meta charset="UTF-8" />
-<meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>Saudi Arabia Incident Map</title>
-
+<title>Map Iframe</title>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.3/dist/leaflet.css" />
+<link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster/dist/MarkerCluster.css" />
+<link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster/dist/MarkerCluster.Default.css" />
 <style>
   html, body, #map {
     height: 100%;
     margin: 0;
     padding: 0;
   }
-  #map, #map * {
-    cursor: default !important;
-  }
 </style>
 </head>
 <body>
 <div id="map"></div>
 
-<!-- Libraries -->
 <script src="https://unpkg.com/leaflet@1.9.3/dist/leaflet.js"></script>
-<script src="https://unpkg.com/supercluster@8.0.1/dist/supercluster.min.js"></script>
+<script src="https://unpkg.com/leaflet.markercluster/dist/leaflet.markercluster.js"></script>
 
 <script>
-  const map = L.map('map', { preferCanvas: true }).setView([24.7136, 46.6753], 6);
-  L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-    attribution: '© OpenStreetMap contributors'
-  }).addTo(map);
+const map = L.map("map").setView([23.8859, 45.0792], 6); // Center Saudi Arabia
+L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
+  maxZoom: 18,
+  attribution: "© OpenStreetMap contributors"
+}).addTo(map);
 
-  const clusterIndex = supercluster({ radius: 60, maxZoom: 17 });
-  const markersLayer = L.layerGroup().addTo(map);
+const clusterGroup = L.markerClusterGroup();
+map.addLayer(clusterGroup);
 
-  let allPoints = [];
-  let selectedState = null;
+let markerDataMap = new Map();
 
-  const BLUE = "#007bff";
-  const YELLOW = "#ffcc00";
+// 🔹 Function to send a variable update request to parent
+function sendVariableUpdate(variableName, variableValue) {
+  const payload = {
+    type: "updateVariable",
+    variable: variableName,
+    value: variableValue
+  };
+  console.log("Iframe: sending variable update request:", payload);
+  window.parent.postMessage(payload, "*");
+}
 
-  function renderClusters() {
-    markersLayer.clearLayers();
-
-    const bounds = map.getBounds();
-    const zoom = map.getZoom();
-    const bbox = [bounds.getWest(), bounds.getSouth(), bounds.getEast(), bounds.getNorth()];
-    const clusters = clusterIndex.getClusters(bbox, zoom);
-
-    clusters.forEach(cluster => {
-      const [lng, lat] = cluster.geometry.coordinates;
-
-      if (cluster.properties.cluster) {
-        // Cluster point
-        const count = cluster.properties.point_count;
-        const size = Math.min(40, 10 + Math.log(count) * 5);
-        const circle = L.circleMarker([lat, lng], {
-          radius: size / 2,
-          fillColor: "#3388ff",
-          color: "#ffffff",
-          weight: 1,
-          fillOpacity: 0.8,
-          interactive: false
-        }).bindTooltip(`${count} points`);
-        circle.on("click", () => map.setView([lat, lng], zoom + 2));
-        markersLayer.addLayer(circle);
-      } else {
-        const { state, count } = cluster.properties;
-        const isSelected = state === selectedState;
-        const marker = L.circleMarker([lat, lng], {
-          radius: 6,
-          fillColor: isSelected ? YELLOW : BLUE,
-          color: "#fff",
-          weight: 1,
-          fillOpacity: 1
-        });
-        marker.on("click", () => handleMarkerClick(state, lat, lng, count));
-        markersLayer.addLayer(marker);
-      }
-    });
+// 🔹 Listen for incident data messages from Grafana
+window.addEventListener("message", (event) => {
+  console.log("Iframe: message received:", event.data);
+  const data = event.data;
+  if (!data || !data.incidentData) {
+    console.warn("Iframe: no incidentData in message");
+    return;
   }
 
-  function handleMarkerClick(state, lat, lng, count) {
-    if (selectedState === state) {
-      selectedState = null;
-      window.parent.postMessage({
-        type: "mapClick",
-        state: "All",
-        lat: "All",
-        long: "All",
-        label: "All",
-        count: "All"
-      }, "*");
-    } else {
-      selectedState = state;
-      window.parent.postMessage({
+  const arr = data.incidentData;
+  clusterGroup.clearLayers();
+  markerDataMap.clear();
+
+  let bounds = [];
+
+  arr.forEach((d, idx) => {
+    const { state, lat, long, count } = d;
+    if (lat == null || long == null) return;
+
+    const tooltip = `
+<strong>State:</strong> ${state}<br/>
+<strong>Lat:</strong> ${lat}<br/>
+<strong>Long:</strong> ${long}<br/>
+<strong>Count:</strong> ${count}
+    `;
+
+    const marker = L.marker([lat, long], { title: state });
+    marker.bindTooltip(tooltip, { direction: "top", permanent: false, opacity: 0.9 });
+
+    // 🔹 On marker click: send mapClick message and variable update request
+    marker.on("click", () => {
+      const payload = {
         type: "mapClick",
         state: state,
         lat: lat,
-        long: lng,
-        label: state,
-        count: count
-      }, "*");
-    }
-    renderClusters();
-  }
+        long: long,
+        count: count,
+        label: state
+      };
+      console.log("Iframe: marker clicked:", payload);
 
-  // 🔹 Grafana → HTML panel data listener
-  window.addEventListener("message", (event) => {
-    const payload = event.data;
-    if (!payload || !payload.series) return;
+      // Send the mapClick event for generic parent handling
+      window.parent.postMessage(payload, "*");
 
-    try {
-      const rows = payload.series[0].fields;
-      const state = rows.find(f => f.name.toLowerCase().includes("state"));
-      const lat = rows.find(f => f.name.toLowerCase().includes("lat"));
-      const long = rows.find(f => f.name.toLowerCase().includes("long"));
-      const count = rows.find(f => f.name.toLowerCase().includes("count"));
+      // Send a separate event specifically for updating Grafana variable
+      sendVariableUpdate("LOCATIONNAME", state);
+    });
 
-      const len = state.values.length;
-      allPoints = [];
+    clusterGroup.addLayer(marker);
+    bounds.push([lat, long]);
+  });
 
-      for (let i = 0; i < len; i++) {
-        const s = state.values[i];
-        const la = parseFloat(lat.values[i]);
-        const lo = parseFloat(long.values[i]);
-        const c = count.values[i];
-
-        if (!isNaN(la) && !isNaN(lo)) {
-          allPoints.push({
-            type: "Feature",
-            geometry: { type: "Point", coordinates: [lo, la] },
-            properties: { state: s, count: c }
-          });
-        }
-      }
-
-      if (allPoints.length > 0) {
-        clusterIndex.load(allPoints);
-        const latLngs = allPoints.map(p => [p.geometry.coordinates[1], p.geometry.coordinates[0]]);
-        map.fitBounds(latLngs, { padding: [30, 30] });
-      }
-      renderClusters();
-      console.log(`✅ Loaded ${allPoints.length} points from query`);
-    } catch (e) {
-      console.error("Data parsing error:", e);
+  // Cluster click: only open popup
+  clusterGroup.on("clusterclick", (a) => {
+    const markers = a.layer.getAllChildMarkers();
+    if (markers.length > 0) {
+      const first = markers[0].getLatLng();
+      const popup = `
+<strong>Cluster size:</strong> ${markers.length}<br/>
+<strong>First state:</strong> ${markers[0].options.title}<br/>
+<strong>Lat:</strong> ${first.lat}<br/>
+<strong>Long:</strong> ${first.lng}
+      `;
+      L.popup().setLatLng(a.latlng).setContent(popup).openOn(map);
+      console.log("Iframe: cluster clicked (popup only, no variable update)");
     }
   });
 
-  map.on("moveend", renderClusters);
-  console.log("🚀 Saudi Arabia Map Ready for Dynamic Query Data");
+  if (bounds.length > 0) {
+    const b = L.latLngBounds(bounds);
+    map.fitBounds(b, { padding: [40, 40] });
+  }
+});
+
+console.log("Iframe map page initialized, waiting for parent message...");
 </script>
 </body>
 </html>
